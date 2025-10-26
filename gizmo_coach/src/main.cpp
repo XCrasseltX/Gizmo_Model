@@ -15,6 +15,17 @@
 #include "brain_io.h"
 #include "livekit_stub.h"
 
+// Platform detection
+#ifdef _WIN32
+    #define PLATFORM_WINDOWS
+    #define NULL_DEVICE "nul"
+    #define PATH_SEP "\\"
+#else
+    #define PLATFORM_LINUX
+    #define NULL_DEVICE "/dev/null"
+    #define PATH_SEP "/"
+#endif
+
 // Projekt-Hauptverzeichnis, in dem docker-compose.yml liegt
 std::string projectDir = R"(./../brain_core)";
 
@@ -22,7 +33,11 @@ int seq_counter = 0;
 
 // Prüfen, ob Docker läuft
 bool docker_available() {
+#ifdef PLATFORM_WINDOWS
     int result = std::system("docker compose version >nul 2>&1");
+#else
+    int result = std::system("docker compose version >/dev/null 2>&1");
+#endif
     return result == 0;
 }
 
@@ -91,8 +106,11 @@ int stop_brain() {
 
     std::cout << "[INFO] Versuche Brain zu beenden...\n";
 
-    // Stoppt alle Container, die "brain" heißen oder davon abgeleitet sind
+#ifdef PLATFORM_WINDOWS
     int ret = std::system("docker stop $(docker ps -q --filter name=brain) >nul 2>&1");
+#else
+    int ret = std::system("docker stop $(docker ps -q --filter name=brain) >/dev/null 2>&1");
+#endif
 
     if (ret != 0) {
         std::cout << "[WARN] Kein laufender Brain-Container gefunden oder Stop fehlgeschlagen.\n";
@@ -100,8 +118,11 @@ int stop_brain() {
         std::cout << "[OK] Brain wurde beendet.\n";
     }
 
-    // Aufräumen (sicherstellen, dass keine Compose-Ressourcen hängen)
+#ifdef PLATFORM_WINDOWS
     std::system("docker compose down >nul 2>&1");
+#else
+    std::system("docker compose down >/dev/null 2>&1");
+#endif
 
     return 0;
 }
@@ -113,10 +134,17 @@ int build_brain() {
         return 1;
     }
 
+#ifdef PLATFORM_WINDOWS
     std::string buildCmd =
-    "cd /d \"" + projectDir + "\" && "
-    "docker compose run --rm --entrypoint /bin/bash brain -lc "
-    "\"rm -rf build/* build/.[!.]* build/..?* 2>/dev/null; cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build\"";
+        "cd /d \"" + projectDir + "\" && "
+        "docker compose run --rm --entrypoint /bin/bash brain -lc "
+        "\"rm -rf build/* build/.[!.]* build/..?* 2>/dev/null; cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build\"";
+#else
+    std::string buildCmd =
+        "cd \"" + projectDir + "\" && "
+        "docker compose run --rm --entrypoint /bin/bash brain -lc "
+        "\"rm -rf build/* build/.[!.]* build/..?* 2>/dev/null; cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build\"";
+#endif
 
     std::cout << "[INFO] Baue Brain (Docker)...\n";
     int ret = std::system(buildCmd.c_str());
@@ -131,72 +159,64 @@ int build_brain() {
 int start_brain() {
     if (!docker_available()) {
         std::cerr << "[ERROR] Docker Compose not available.\n";
-        std::cerr << "Bitte sicherstellen, dass Docker Desktop läuft.\n";
         return 1;
     }
 
-    std::cout << "[INFO] Starte Brain und Monitoring in separaten Fenstern ...\n";
+    std::cout << "[INFO] Starte Brain...\n";
 
     std::string dockerCmd =
-        "cd /d \"" + projectDir + "\" && "
+        "cd \"" + projectDir + "\" && "
         "docker compose run -T --rm "
         "--entrypoint /bin/bash brain -lc \"./build/brain --steps -1 --realtime\"";
 
-    // Brain-Startskript temporär speichern
+#ifdef PLATFORM_WINDOWS
+    // Windows: Neue PowerShell-Fenster
     std::string brainScript = "start_brain_tmp.bat";
     {
         std::ofstream script(brainScript, std::ios::trunc);
         script << dockerCmd;
     }
     
-    // Neues Fenster für Brain
     std::string psBrain = "start powershell -NoExit -Command \"chcp 65001; cmd /c " + brainScript + "\"";
-    // 🪶 2️⃣ Monitoring-Fenster: startet den Coach selbst mit `monitor`
-    // Ermittle den absoluten Pfad zum aktuellen Verzeichnis und zur EXE
+    
     std::string exePath = (std::filesystem::current_path() / "build/Release/gizmo_coach.exe").string();
-
-    // PowerShell erwartet Backslashes (Windows-Stil)
     for (auto &c : exePath) if (c == '/') c = '\\';
-
-    // Spike Monitoring-Fenster mit absolutem Pfad starten
+    
     std::string ps_S_Monitor = "start powershell -NoExit -Command \"chcp 65001; & '" + exePath + "' monitor-spikes\"";
-
-    // Spike Monitoring-Fenster mit absolutem Pfad starten
     std::string ps_L_Monitor = "start powershell -NoExit -Command \"chcp 65001; & '" + exePath + "' monitor-logs\"";
     
-    std::cout << "[INFO] Starte Brain in neuem PowerShell-Fenster...\n";
     int ret1 = std::system(psBrain.c_str());
-    if (ret1 != 0)
-        std::cerr << "[WARN] Start fehlgeschlagen (exit code " << ret1 << ").\n";
-    else
-        std::cout << "[OK] Brain-Fenster gestartet.\n";
-
-    // Kurze Pause, damit das Brain-Verzeichnis existiert, bevor Monitor startet
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    int ret2 = std::system(ps_S_Monitor.c_str());
+    int ret3 = std::system(ps_L_Monitor.c_str());
+    
+    std::remove(brainScript.c_str());
+    
+#else
+    // Linux: Hintergrund-Prozesse mit nohup
+    std::string brainCmd = dockerCmd + " > brain.log 2>&1 &";
+    
+    std::string exePath = (std::filesystem::current_path() / "build/gizmo_coach").string();
+    std::string monitorSpikesCmd = exePath + " monitor-spikes > spikes.log 2>&1 &";
+    std::string monitorLogsCmd = exePath + " monitor-logs > logs.log 2>&1 &";
+    
+    std::cout << "[INFO] Starte Brain im Hintergrund...\n";
+    int ret1 = std::system(brainCmd.c_str());
+    
     std::this_thread::sleep_for(std::chrono::seconds(1));
     
-    // Monitor starten
-    std::cout << "[INFO] Öffne Monitoring-Fenster...\n";
-    int ret2 = std::system(ps_S_Monitor.c_str());
-    if (ret2 != 0)
-        std::cerr << "[WARN] Monitoring konnte nicht gestartet werden (exit " << ret2 << ").\n";
-    else
-        std::cout << "[OK] Monitoring-Fenster gestartet.\n";
+    std::cout << "[INFO] Starte Monitoring...\n";
+    int ret2 = std::system(monitorSpikesCmd.c_str());
+    int ret3 = std::system(monitorLogsCmd.c_str());
+    
+    std::cout << "[OK] Brain und Monitoring laufen im Hintergrund.\n";
+    std::cout << "     Logs: brain.log, spikes.log, logs.log\n";
+#endif
 
-    // Monitor starten
-    std::cout << "[INFO] Öffne Monitoring-Fenster...\n";
-    int ret3 = std::system(ps_L_Monitor.c_str());
-    if (ret3 != 0)
-        std::cerr << "[WARN] Monitoring konnte nicht gestartet werden (exit " << ret2 << ").\n";
-    else
-        std::cout << "[OK] Monitoring-Fenster gestartet.\n";
-
-    // Batch-Datei nach Start löschen
-    std::remove(brainScript.c_str());
-
-    //Starte MCP Server
+    // MCP Server starten (blockiert)
     handle_from_livekit("");
 
-    return (ret1 || ret2 || ret3);
+    return 0;
 }
 
 int main(int argc, char** argv) {

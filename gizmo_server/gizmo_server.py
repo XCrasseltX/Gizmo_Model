@@ -152,7 +152,7 @@ class CppCoachClient:
 class MCPGatewayClient:
     """Verbindet sich mit dem MCP Gateway über Streamable HTTP Protocol"""
     
-    def __init__(self, gateway_host: str = "localhost", gateway_port: int = 8080):
+    def __init__(self, gateway_host: str = "localhost", gateway_port: int = PORT_MCP_GATEWAY):
         self.gateway_url = f"http://{gateway_host}:{gateway_port}"
         self.mcp_endpoint = "/mcp"  # <-- NEU: Endpoint definieren
         self.client = None

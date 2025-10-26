@@ -3,7 +3,7 @@
 ## Voraussetzungen
 
 - Python 3.12 installiert
-- C++ Coach läuft auf Port 8080
+- C++ Coach läuft auf Port 5001
 - Gemini API Key
 
 ## Installation
@@ -36,7 +36,7 @@ pip install -r requirements.txt
 Erstelle `.env` Datei und füge deinen Gemini API Key ein:
 
 ```env
-CPP_COACH_URL=http://localhost:8080
+CPP_COACH_URL=http://localhost:5001
 GEMINI_API_KEY=dein-api-key-hier
 GEMINI_MODEL=gemini-2.0-flash-exp
 ```
@@ -48,18 +48,18 @@ GEMINI_MODEL=gemini-2.0-flash-exp
 
 ### 5. alles starten
 
-Stelle sicher, dass dein C++ Coach auf Port 8080 läuft:
+Stelle sicher, dass dein C++ Coach auf Port 5001 läuft:
 
 ```powershell
 # Test ob Coach erreichbar ist
-curl -X POST http://localhost:8080 `
+curl -X POST http://localhost:5001 `
      -H "Content-Type: application/json" `
      -d '{"method":"get_prompt_context","params":{"user_text":"test"}}'
 ```
 redis starten
 
 ```powershell
-docker run --name redis-server -d -p 6379:6379 redis
+docker run --name redis-server -d -p 5003:6379 redis
 ```
 
 docker mcp starten
@@ -77,10 +77,10 @@ python gizmo_server.py
 **Ausgabe sollte sein:**
 ```
 🚀 Starte Gizmo Python LLM Server
-   C++ Coach: http://localhost:8080
+   C++ Coach: http://localhost:5001
    Gemini Modell: gemini-2.0-flash-exp
 INFO:     Started server process
-INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Uvicorn running on http://0.0.0.0:5000
 ```
 
 ### 7. Tests ausführen
@@ -98,7 +98,6 @@ gizmo-server/
 ├── gizmo_server.py      # Hauptserver
 ├── requirements.txt     # Dependencies
 ├── .env                 # Konfiguration
-├── test_gizmo.py        # Test Script
 └── SETUP.md             # Diese Datei
 ```
 
@@ -106,12 +105,12 @@ gizmo-server/
 
 ### Health Check
 ```powershell
-curl http://localhost:8000/health
+curl http://localhost:5000/health
 ```
 
 ### Konversation (wie HA es nutzt)
 ```powershell
-curl -X POST http://localhost:8000/api/conversation `
+curl -X POST http://localhost:5000/api/conversation `
      -H "Content-Type: application/json" `
      -d '{\"text\":\"Hallo Gizmo\",\"conversation_id\":\"test\",\"language\":\"de\"}'
 ```
@@ -119,15 +118,13 @@ curl -X POST http://localhost:8000/api/conversation `
 ## Troubleshooting
 
 ### Problem: "C++ Coach nicht erreichbar"
-- Prüfe ob Coach auf Port 8080 läuft
-- Teste direkt: `curl http://localhost:8080`
+- Prüfe ob Coach auf Port 5001 läuft
+- Teste direkt: `curl http://localhost:5001`
 
 ### Problem: "Gemini API Error"
 - Prüfe API Key in `.env`
 - Teste API Key: https://aistudio.google.com/apikey
 
-### Problem: "Port 8000 bereits belegt"
-- Ändere Port in `gizmo_server.py` Zeile 277: `port=8001`
 
 ## Windows Firewall
 
@@ -135,7 +132,7 @@ Falls HA von anderem Gerät zugreifen soll:
 
 ```powershell
 # PowerShell als Admin
-New-NetFirewallRule -DisplayName "Gizmo Server" -Direction Inbound -LocalPort 8000 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "Gizmo Server" -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow
 ```
 
 ## Raspberry Pi Migration
@@ -164,7 +161,7 @@ Der Raspi läuft bereits:
 - **PiHole** (Port 53, 80, 443)
 - **Minecraft Server** (Port 25565)
 
-→ **Port 8000 ist frei** ✓
-→ **Port 8080 für C++ Coach** ✓
+→ **Port 5000 ist frei** ✓
+→ **Port 5001 für C++ Coach** ✓
 
 Keine Konflikte!

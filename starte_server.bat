@@ -1,1 +1,0 @@
-python gizmo_server\gizmo_server.py

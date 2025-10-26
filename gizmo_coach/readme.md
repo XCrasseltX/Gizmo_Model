@@ -6,16 +6,16 @@ cmake --build build --config Release
 ```
 ### Start Brain
 ```bash
-.\Release\gizmo_coach.exe start-brain
+.\build\Release\gizmo_coach.exe start-brain
 ```
 ### sende eine mcp anfrage damit der prompt zurück kommt
 ```bash
-curl -X POST http://localhost:8080 -H "Content-Type: application/json" -d '{"method":"get_prompt_context","params":{"user_text":"mach das licht an"}}'
+curl -X POST http://localhost:5001 -H "Content-Type: application/json" -d '{"method":"get_prompt_context","params":{"user_text":"mach das licht an"}}'
 ```
 
 ### sende eine mcp anfrage um die hormone anzupassen
 ```bash
-curl -X POST http://localhost:8080 `
+curl -X POST http://localhost:5001 `
      -H "Content-Type: application/json" `
      -d '{"method":"get_prompt_context","params":{"user_text":"mach das licht an"}}'
 ```

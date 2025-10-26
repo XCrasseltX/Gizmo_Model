@@ -54,3 +54,16 @@ target_include_directories(gizmo_coach PRIVATE
 target_link_libraries(gizmo_coach PRIVATE
     nlohmann_json::nlohmann_json
 )
+
+# -----------------------------------------------------------------------------
+# Platform-specific settings
+# -----------------------------------------------------------------------------
+if(WIN32)
+    # Windows: keine zusätzlichen Flags nötig
+    target_compile_definitions(gizmo_coach PRIVATE PLATFORM_WINDOWS)
+else()
+    # Linux/Raspberry Pi: Threads + Filesystem
+    find_package(Threads REQUIRED)
+    target_link_libraries(gizmo_coach PRIVATE Threads::Threads)
+    target_compile_definitions(gizmo_coach PRIVATE PLATFORM_LINUX)
+endif()
