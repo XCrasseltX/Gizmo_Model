@@ -8,10 +8,10 @@ python gizmo_start.py
 ```
 Linux:
 ```bash
-bashchmod +x gizmo_start.py
+chmod +x gizmo_start.py
 ./start_all.py
 ```
 Oder:
 ```bash
-bashpython3 gizmo_start.py
+python3 gizmo_start.py
 ```
