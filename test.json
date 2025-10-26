@@ -1,0 +1,5 @@
+{
+  "**to**": "recipient@example.com",
+  "**subject**": "Hello from MCP!",
+  "**body**": "This email was sent via the Email MCP Server"
+}

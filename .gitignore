@@ -1,0 +1,38 @@
+# Build artefacts
+**/build/
+**/CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+*.o
+*.obj
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs & temp
+*.log
+*.tmp
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Python (falls Coach später dazu kommt)
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.env
+
+# Docker
+*.pid
+*.tar
+
+# AI
+io/
+.log
+**rewards.json    

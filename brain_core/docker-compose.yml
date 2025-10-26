@@ -1,0 +1,19 @@
+
+services:
+  brain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: brain_core:cpu
+    container_name: brain_core_dev
+    working_dir: /work
+    network_mode: "none"
+    volumes:
+      - .:/work
+      - ./io:/io
+      - ./build:/work/build
+    tty: true
+    stdin_open: true
+    user: root
+volumes:
+  brain_build:
