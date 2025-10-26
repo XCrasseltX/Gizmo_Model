@@ -119,7 +119,7 @@ def start_redis():
             ["docker", "run", "--name", "redis-server", "-d", "-p", f"{PORT_REDIS}:6379", "redis"],
             check=True,
             capture_output=True,
-            timeout=10
+            timeout=60
         )
         print(f"  {GREEN}✓{RESET} Redis started on port {PORT_REDIS}")
         time.sleep(1)
