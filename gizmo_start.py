@@ -36,7 +36,7 @@ if IS_WINDOWS:
     COACH_EXE = COACH_DIR / "build" / "Release" / "gizmo_coach.exe"
     PYTHON_CMD = "python"
 else:
-    COACH_EXE = COACH_DIR / "build" / "gizmo_coach"
+    COACH_EXE = COACH_DIR / "build" / "Release" / "gizmo_coach"
     PYTHON_CMD = "python3"
 
 PYTHON_SERVER = SERVER_DIR / "gizmo_server.py"

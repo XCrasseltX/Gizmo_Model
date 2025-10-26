@@ -9,7 +9,7 @@ python gizmo_start.py
 Linux:
 ```bash
 chmod +x gizmo_start.py
-./start_all.py
+./gizmo_start.py
 ```
 Oder:
 ```bash
