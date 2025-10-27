@@ -37,7 +37,7 @@ if IS_WINDOWS:
     PYTHON_CMD = "python"
 else:
     COACH_EXE = COACH_DIR / "build" / "Release" / "gizmo_coach"
-    PYTHON_CMD = "python3"
+    PYTHON_CMD = "python"
 
 PYTHON_SERVER = SERVER_DIR / "gizmo_server.py"
 
@@ -205,7 +205,7 @@ def start_mcp_gateway():
     try:
         if IS_WINDOWS:
             # Windows: Neues PowerShell-Fenster
-            cmd = f'start powershell -NoExit -Command "docker mcp gateway run --port {PORT_MCP} --transport Streaming --no-auth"'
+            cmd = f'start powershell -NoExit -Command "docker mcp gateway run --port {PORT_MCP} --transport sse"'
             subprocess.Popen(cmd, shell=True)
             print(f"  {GREEN}✓{RESET} MCP Gateway starting in new window on port {PORT_MCP}...")
         else:
@@ -217,7 +217,7 @@ def start_mcp_gateway():
                 ['konsole', '-e'],
             ]
             
-            cmd = f'docker mcp gateway run --port {PORT_MCP} --transport Streaming --no-auth; exec bash'
+            cmd = f'docker mcp gateway run --port {PORT_MCP} --transport Streaming; exec bash'
             
             started = False
             for term in terminals:
