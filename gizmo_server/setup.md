@@ -122,9 +122,7 @@ curl http://localhost:5000/health
 
 ### Konversation (wie HA es nutzt)
 ```powershell
-curl -X POST http://localhost:5000/api/conversation `
-     -H "Content-Type: application/json" `
-     -d '{\"text\":\"Hallo Gizmo\",\"conversation_id\":\"test\",\"language\":\"de\"}'
+curl -X POST http://localhost:5000/api/conversation -H "Content-Type: application/json" -d '{"text":"Hallo Gizmo","conversation_id":"test","language":"de"}'
 ```
 
 ## Troubleshooting

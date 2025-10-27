@@ -333,17 +333,6 @@ class MCPGatewayClient:
                 
                 # Konvertiere MCP Tools zu Gemini Format
                 self.tools = []
-
-                # Hilfsfunktion zur Bereinigung inkompatibler JSON-Schema Felder
-                def sanitize_schema(schema):
-                    if isinstance(schema, dict):
-                        allowed = {"type", "properties", "required", "description", "items"}
-                        clean = {k: sanitize_schema(v) for k, v in schema.items() if k in allowed}
-                        return clean
-                    elif isinstance(schema, list):
-                        return [sanitize_schema(i) for i in schema]
-                    return schema
-                
                 for tool in mcp_tools:
                     gemini_tool = {
                         "name": tool.get("name"),
@@ -353,9 +342,10 @@ class MCPGatewayClient:
                     # Konvertiere inputSchema zu parameters
                     input_schema = tool.get("inputSchema", {})
                     if input_schema:
+                        # Entferne MCP-spezifische Felder
                         parameters = {
                             "type": input_schema.get("type", "object"),
-                            "properties": sanitize_schema(input_schema.get("properties", {})),
+                            "properties": input_schema.get("properties", {}),
                             "required": input_schema.get("required", [])
                         }
                         gemini_tool["parameters"] = parameters

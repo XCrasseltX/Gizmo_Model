@@ -205,7 +205,7 @@ def start_mcp_gateway():
     try:
         if IS_WINDOWS:
             # Windows: Neues PowerShell-Fenster
-            cmd = f'start powershell -NoExit -Command "docker mcp gateway run --port {PORT_MCP} --transport sse"'
+            cmd = f'start powershell -NoExit -Command "docker mcp gateway run --port {PORT_MCP} --transport Streaming"'
             subprocess.Popen(cmd, shell=True)
             print(f"  {GREEN}✓{RESET} MCP Gateway starting in new window on port {PORT_MCP}...")
         else:
