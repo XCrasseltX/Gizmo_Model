@@ -203,113 +203,64 @@ def wait_for_mcp_ready(timeout=15):
 
 
 def start_mcp_gateway():
-    """Startet MCP Gateway in separatem Fenster"""
+    """Startet den MCP Gateway Docker-Container"""
     print(f"{YELLOW}[4/4] Starting MCP Gateway...{RESET}")
-    
-    # Der Befehl, um die Logs im neuen Terminal anzuzeigen
-    LOG_CMD = f'docker logs -f mcp-gateway; exec bash'
-    # Annahmen f�r GMAIL MCP Server (diese Namen werden im Container ben�tigt)
-    GMAIL_EMAIL_ENV = "GMAIL_EMAIL"
-    GMAIL_PASS_ENV = "GMAIL_PASSWORD"
-    
+
     try:
         if IS_WINDOWS:
-            # Windows: Neues PowerShell-Fenster
+            # Windows: PowerShell-Fenster öffnen
             cmd = f'start powershell -NoExit -Command "docker mcp gateway run --port {PORT_MCP} --transport Streaming"'
             subprocess.Popen(cmd, shell=True)
             print(f"  {GREEN}✓{RESET} MCP Gateway starting in new window on port {PORT_MCP}...")
+            return True
+
+        # --- Linux / Raspberry Pi ---
+        subprocess.run(["docker", "rm", "-f", "mcp-gateway"], capture_output=True)
+        print(f"  {YELLOW}↻{RESET} Removed old 'mcp-gateway' container (if existed).")
+
+        # Tools aus JSON laden
+        TOOLS_CONFIG_PATH = SCRIPT_DIR / "/mcp/tools_config.json"
+        servers_arg = ""
+        try:
+            with open(TOOLS_CONFIG_PATH, "r") as f:
+                config = json.load(f)
+                servers_arg = ",".join(config.get("servers", []))
+        except Exception as e:
+            print(f"  {YELLOW}⚠{RESET} Could not read tools_config.json: {e}")
+
+        # Secrets-Datei (relativer Pfad)
+        secret_file = SCRIPT_DIR / "/mcp/mcp-secrets.yaml"
+        secret_mount = []
+        if secret_file.exists():
+            secret_mount = ["-v", f"{secret_file}:/.s0"]
+            print(f"  {GREEN}✓{RESET} Using secrets file: {secret_file}")
         else:
-            # Linux:
+            print(f"  {YELLOW}⚠{RESET} No secrets file found at {secret_file} — Gmail MCP may fail.")
 
-            print(f"  {YELLOW}?{RESET} Removing existing container 'mcp-gateway'...")
-            
+        # Docker Run Command
+        DOCKER_RUN_CMD = [
+            "docker", "run", "-d",
+            "-p", f"{PORT_MCP}:{PORT_MCP}",
+            "--restart=always",
+            "--name=mcp-gateway",
+            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            *secret_mount,
+            "docker/mcp-gateway",
+            f"--port={PORT_MCP}",
+            "--transport=streaming",
+            f"--servers={servers_arg}",
+        ]
 
-            # 1. Serverliste aus JSON laden
-            TOOLS_CONFIG_PATH = SCRIPT_DIR / "tools_config.json"
+        print("\nDEBUG: " + " ".join(DOCKER_RUN_CMD) + "\n")
+        subprocess.run(DOCKER_RUN_CMD, check=True, timeout=60)
+        print(f"  {GREEN}✓{RESET} MCP Gateway started on port {PORT_MCP}.")
 
-            # 2. Umgebungsvariablen für Gmail aus der geladenen Umgebung abrufen
-            gmail_env = []
-                
-            # Liest die Variablen aus der .env-Datei (über os.getenv)
-            user = os.getenv("GIZMO_GMAIL_USER")
-            password = os.getenv("GIZMO_GMAIL_PASS")
-            
-            if user and password:
-                # Erstelle die -e Argumente, die die Host-Variable auf die Container-Variable mappen
-                gmail_env.extend([
-                    '-e', f'{GMAIL_EMAIL_ENV}={user}',
-                    '-e', f'{GMAIL_PASS_ENV}={password}'
-                ])
-                print(f"  {GREEN}?{RESET} Gmail Secrets (User/Pass) gefunden und konfiguriert.")
-            else:
-                # F�llt auf die Standard-Fallback-Werte zur�ck
-                print(f"  {YELLOW}?{RESET} Gmail Secrets nicht in .env gefunden. Gmail-Server k�nnte fehlschlagen.")
-                        
-            try:
-                with open(TOOLS_CONFIG_PATH, 'r') as f:
-                    config = json.load(f)
-                    server_list = config.get("servers", [])
-                    servers_arg = ",".join(server_list)
-            except Exception as e:
-                print(f"  {RED}?{RESET} Konfigurationsfehler (tools_config.json): {e}")
-
-
-            try:
-                # Versucht, den Container zu stoppen und zu entfernen (erzeugt Fehler, wenn er nicht existiert)
-                subprocess.run(["docker", "rm", "-f", "mcp-gateway"], capture_output=True, timeout=10)
-            except:
-                # Fehler ignorieren, da wir nur sicherstellen wollen, dass er weg ist
-                pass
-
-            # Der Befehl, um den Container zu starten (als Liste für subprocess.run)
-            DOCKER_RUN_CMD = [
-                'docker', 'run', '-d', 
-                '-p', f'{PORT_MCP}:{PORT_MCP}', 
-                '--restart=always', 
-                '--name=mcp-gateway', 
-                '-v', '/var/run/docker.sock:/var/run/docker.sock', 
-                # HINZUFÜGEN DER GMAIL SECRETS ÜBER -e
-                *gmail_env,
-                
-                'docker/mcp-gateway', 
-                f'--port={PORT_MCP}', 
-                '--transport=streaming',
-                
-                # Serverliste übergeben
-                f'--servers={servers_arg}' 
-            ]
-            
-            # 1. Container im Hintergrund starten
-            subprocess.run(DOCKER_RUN_CMD, check=True, capture_output=True, timeout=60)
-            print(f"  {GREEN}?{RESET} MCP Gateway container 'mcp-gateway' started in background on port {PORT_MCP}.")
-            
-            # 2. Log-Anzeige in einem neuen Terminal versuchen
-            terminals = [
-                ['gnome-terminal', '--', 'bash', '-c'],
-                ['xterm', '-e'],
-                ['konsole', '-e'],
-            ]
-            
-            started = False
-            for term in terminals:
-                try:
-                    # öffne ein neues Terminal und zeige die Logs an
-                    subprocess.Popen(term + [LOG_CMD])
-                    started = True
-                    print(f"  {GREEN}?{RESET} Opened new terminal to show MCP Gateway logs.")
-                    break
-                except FileNotFoundError:
-                    continue
-            
-            if not started:
-                # Kein Terminal gefunden, aber der Container läuft bereits
-                print(f"  {YELLOW}?{RESET} No suitable terminal found to display logs. Continuing.")
-        
         return True
-        
+
     except Exception as e:
         print(f"  {RED}✗{RESET} Failed to start MCP Gateway: {e}")
         return False
+
 
 
 def start_python_server():
