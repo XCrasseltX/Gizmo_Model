@@ -232,10 +232,10 @@ def start_mcp_gateway():
         secret_file = SCRIPT_DIR / "mcp" / "mcp-secrets.yaml"
         secret_mount = []
         if secret_file.exists():
-            secret_mount = ["-v", f"{secret_file}:/.s0"]
+            secret_mount = ["-v", f"{secret_file}:/secrets.yaml"]  # ← Geändert!
             print(f"  {GREEN}✓{RESET} Using secrets file: {secret_file}")
         else:
-            print(f"  {YELLOW}⚠{RESET} No secrets file found at {secret_file} — Gmail MCP may fail.")
+            print(f"  {YELLOW}⚠{RESET} No secrets file found at {secret_file} – Gmail MCP may fail.")
 
         # Docker Run Command
         DOCKER_RUN_CMD = [
