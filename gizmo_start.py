@@ -219,7 +219,7 @@ def start_mcp_gateway():
         print(f"  {YELLOW}↻{RESET} Removed old 'mcp-gateway' container (if existed).")
 
         # Tools aus JSON laden
-        TOOLS_CONFIG_PATH = SCRIPT_DIR / "/mcp/tools_config.json"
+        TOOLS_CONFIG_PATH = SCRIPT_DIR /  "/mcp" / "/tools_config.json"
         servers_arg = ""
         try:
             with open(TOOLS_CONFIG_PATH, "r") as f:
@@ -229,7 +229,7 @@ def start_mcp_gateway():
             print(f"  {YELLOW}⚠{RESET} Could not read tools_config.json: {e}")
 
         # Secrets-Datei (relativer Pfad)
-        secret_file = SCRIPT_DIR / "/mcp/mcp-secrets.yaml"
+        secret_file = SCRIPT_DIR / "/mcp" / "/mcp-secrets.yaml"
         secret_mount = []
         if secret_file.exists():
             secret_mount = ["-v", f"{secret_file}:/.s0"]
