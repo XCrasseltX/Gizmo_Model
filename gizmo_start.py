@@ -205,7 +205,7 @@ def start_mcp_gateway():
     try:
         if IS_WINDOWS:
             # Windows: Neues PowerShell-Fenster
-            cmd = f'start powershell -NoExit -Command "docker mcp gateway run --port {PORT_MCP} --transport Streaming"'
+            cmd = f'start powershell -NoExit -Command "docker mcp gateway run --port {PORT_MCP} --transport Streaming --no-auth"'
             subprocess.Popen(cmd, shell=True)
             print(f"  {GREEN}✓{RESET} MCP Gateway starting in new window on port {PORT_MCP}...")
         else:
@@ -217,7 +217,7 @@ def start_mcp_gateway():
                 ['konsole', '-e'],
             ]
             
-            cmd = f'docker mcp gateway run --port {PORT_MCP} --transport Streaming; exec bash'
+            cmd = f'docker mcp gateway run --port {PORT_MCP} --transport Streaming --no-auth; exec bash'
             
             started = False
             for term in terminals:

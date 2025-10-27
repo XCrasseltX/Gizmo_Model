@@ -16,7 +16,7 @@ cd gizmo-server
 ```
 
 ### 2. Virtuelle Umgebung erstellen
-
+Windows
 ```powershell
 # Virtuelle Umgebung erstellen
 py -3.11 -m venv venv
@@ -24,10 +24,23 @@ py -3.11 -m venv venv
 # Aktivieren
 .\venv\Scripts\activate
 ```
+Linux
+```bash
+# Virtuelle Umgebung erstellen
+python -m venv venv
+
+# Aktivieren
+source venv/bin/activate
+```
 
 ### 3. Dependencies installieren
 
+Windows
 ```powershell
+pip install -r requirements.txt
+```
+Linux
+```bash
 pip install -r requirements.txt
 ```
 
@@ -36,9 +49,8 @@ pip install -r requirements.txt
 Erstelle `.env` Datei und füge deinen Gemini API Key ein:
 
 ```env
-CPP_COACH_URL=http://localhost:5001
 GEMINI_API_KEY=dein-api-key-hier
-GEMINI_MODEL=gemini-2.0-flash-exp
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 **Gemini API Key holen:**
