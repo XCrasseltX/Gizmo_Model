@@ -35,4 +35,7 @@ env/
 # AI
 io/
 .log
-**rewards.json    
+**rewards.json  
+
+#mcp
+mcp_secrets/

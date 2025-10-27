@@ -9,6 +9,10 @@ import os
 import time
 import platform
 from pathlib import Path
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Farben für Terminal (funktioniert auf Windows + Linux)
 try:
@@ -202,6 +206,12 @@ def start_mcp_gateway():
     """Startet MCP Gateway in separatem Fenster"""
     print(f"{YELLOW}[4/4] Starting MCP Gateway...{RESET}")
     
+    # Der Befehl, um die Logs im neuen Terminal anzuzeigen
+    LOG_CMD = f'docker logs -f mcp-gateway; exec bash'
+    # Annahmen f�r GMAIL MCP Server (diese Namen werden im Container ben�tigt)
+    GMAIL_EMAIL_ENV = "GMAIL_EMAIL"
+    GMAIL_PASS_ENV = "GMAIL_PASSWORD"
+    
     try:
         if IS_WINDOWS:
             # Windows: Neues PowerShell-Fenster
@@ -209,34 +219,91 @@ def start_mcp_gateway():
             subprocess.Popen(cmd, shell=True)
             print(f"  {GREEN}✓{RESET} MCP Gateway starting in new window on port {PORT_MCP}...")
         else:
-            # Linux: Neues Terminal (wenn verfügbar)
-            # Versuche verschiedene Terminal-Emulatoren
+            # Linux:
+
+            print(f"  {YELLOW}?{RESET} Removing existing container 'mcp-gateway'...")
+            
+
+            # 1. Serverliste aus JSON laden
+            TOOLS_CONFIG_PATH = SCRIPT_DIR / "tools_config.json"
+
+            # 2. Umgebungsvariablen für Gmail aus der geladenen Umgebung abrufen
+            gmail_env = []
+                
+            # Liest die Variablen aus der .env-Datei (über os.getenv)
+            user = os.getenv("GIZMO_GMAIL_USER")
+            password = os.getenv("GIZMO_GMAIL_PASS")
+            
+            if user and password:
+                # Erstelle die -e Argumente, die die Host-Variable auf die Container-Variable mappen
+                gmail_env.extend([
+                    '-e', f'{GMAIL_EMAIL_ENV}={user}',
+                    '-e', f'{GMAIL_PASS_ENV}={password}'
+                ])
+                print(f"  {GREEN}?{RESET} Gmail Secrets (User/Pass) gefunden und konfiguriert.")
+            else:
+                # F�llt auf die Standard-Fallback-Werte zur�ck
+                print(f"  {YELLOW}?{RESET} Gmail Secrets nicht in .env gefunden. Gmail-Server k�nnte fehlschlagen.")
+                        
+            try:
+                with open(TOOLS_CONFIG_PATH, 'r') as f:
+                    config = json.load(f)
+                    server_list = config.get("servers", [])
+                    servers_arg = ",".join(server_list)
+            except Exception as e:
+                print(f"  {RED}?{RESET} Konfigurationsfehler (tools_config.json): {e}")
+
+
+            try:
+                # Versucht, den Container zu stoppen und zu entfernen (erzeugt Fehler, wenn er nicht existiert)
+                subprocess.run(["docker", "rm", "-f", "mcp-gateway"], capture_output=True, timeout=10)
+            except:
+                # Fehler ignorieren, da wir nur sicherstellen wollen, dass er weg ist
+                pass
+
+            # Der Befehl, um den Container zu starten (als Liste für subprocess.run)
+            DOCKER_RUN_CMD = [
+                'docker', 'run', '-d', 
+                '-p', f'{PORT_MCP}:{PORT_MCP}', 
+                '--restart=always', 
+                '--name=mcp-gateway', 
+                '-v', '/var/run/docker.sock:/var/run/docker.sock', 
+                # HINZUFÜGEN DER GMAIL SECRETS ÜBER -e
+                *gmail_env,
+                
+                'docker/mcp-gateway', 
+                f'--port={PORT_MCP}', 
+                '--transport=streaming',
+                
+                # Serverliste übergeben
+                f'--servers={servers_arg}' 
+            ]
+            
+            # 1. Container im Hintergrund starten
+            subprocess.run(DOCKER_RUN_CMD, check=True, capture_output=True, timeout=60)
+            print(f"  {GREEN}?{RESET} MCP Gateway container 'mcp-gateway' started in background on port {PORT_MCP}.")
+            
+            # 2. Log-Anzeige in einem neuen Terminal versuchen
             terminals = [
                 ['gnome-terminal', '--', 'bash', '-c'],
                 ['xterm', '-e'],
                 ['konsole', '-e'],
             ]
             
-            cmd = f'docker mcp gateway run --port {PORT_MCP} --transport Streaming; exec bash'
-            
             started = False
             for term in terminals:
                 try:
-                    subprocess.Popen(term + [cmd])
+                    # öffne ein neues Terminal und zeige die Logs an
+                    subprocess.Popen(term + [LOG_CMD])
                     started = True
-                    print(f"  {GREEN}✓{RESET} MCP Gateway starting in new terminal on port {PORT_MCP}...")
+                    print(f"  {GREEN}?{RESET} Opened new terminal to show MCP Gateway logs.")
                     break
                 except FileNotFoundError:
                     continue
             
             if not started:
-                # Fallback: Hintergrundprozess
-                subprocess.Popen(
-                    ['docker', 'mcp', 'gateway', 'run', '--port', str(PORT_MCP), '--transport', 'Streaming'],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"  {GREEN}✓{RESET} MCP Gateway started in background (no terminal available)")
+                # Kein Terminal gefunden, aber der Container läuft bereits
+                print(f"  {YELLOW}?{RESET} No suitable terminal found to display logs. Continuing.")
         
         return True
         
@@ -248,23 +315,43 @@ def start_mcp_gateway():
 def start_python_server():
     """Startet Python Server (blockierend)"""
     print(f"\n{BLUE}{'='*60}{RESET}")
-    print(f"{GREEN}🚀 Starting Python Server...{RESET}")
+    print(f"{GREEN}?? Starting Python Server...{RESET}")
     print(f"{BLUE}{'='*60}{RESET}\n")
     
     try:
         # Wechsle ins Server-Verzeichnis (für relative Imports)
         os.chdir(SERVER_DIR)
         
+        # NEU: Pfad zum Python-Interpreter im VENV ermitteln
+        venv_path = SERVER_DIR / "venv"
+        
+        if IS_WINDOWS:
+            # Windows: venv/Scripts/python.exe
+            venv_python = venv_path / "Scripts" / "python.exe"
+        else:
+            # Linux: venv/bin/python
+            venv_python = venv_path / "bin" / "python"
+        
+        # Prüfen, ob VENV existiert
+        if not venv_python.exists():
+            print(f"{RED}? VENV Python interpreter not found at: {venv_python}{RESET}")
+            print(f"{YELLOW}?  Falling back to global '{PYTHON_CMD}'... (might fail){RESET}")
+            command = [PYTHON_CMD, "gizmo_server.py"]
+        else:
+            print(f"  {GREEN}?{RESET} Using VENV interpreter: {venv_python}")
+            # Verwende den Python-Interpreter aus dem VENV
+            command = [str(venv_python), "gizmo_server.py"]
+            
         # Starte Python Server (blockiert hier)
         subprocess.run(
-            [PYTHON_CMD, "gizmo_server.py"],
+            command,
             check=True
         )
         
     except KeyboardInterrupt:
-        print(f"\n{YELLOW}⚠  Server stopped by user{RESET}")
+        print(f"\n{YELLOW}?  Server stopped by user{RESET}")
     except Exception as e:
-        print(f"\n{RED}✗ Server error: {e}{RESET}")
+        print(f"\n{RED}? Server error: {e}{RESET}")
         return False
     
     return True
