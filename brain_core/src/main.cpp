@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
 
     // Netz aufbauen
     Net net;
-    const int N = 1000, FAN_IN = 30, Input_Neurons = 120, Output_Neurons = 120;
+    const int N = 50, FAN_IN = 30, Input_Neurons = 10, Output_Neurons = 10;
     net.build_small_demo(N, FAN_IN, Input_Neurons, Output_Neurons);
     IoLogger::instance().set_layer_info(Input_Neurons, Output_Neurons);
 

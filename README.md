@@ -17,7 +17,6 @@ python3 gizmo_start.py
 
 ```
 
-
 ```bash
 docker stop mcp-gateway
 docker rm mcp-gateway
@@ -27,4 +26,15 @@ docker run -d   -p 5002:5002   --restart=always   --name=mcp-gateway   -v /var/r
 
 docker logs -f mcp-gateway
 
+```
+
+Anhalten:
+```bash
+STRG-C //um aus konsole rauszukommen
+docker stop mcp-gateway
+docker rm mcp-gateway
+
+docker ps -a
+
+docker rm -f //Namen der Container
 ```
