@@ -26,15 +26,42 @@ docker run -d   -p 5002:5002   --restart=always   --name=mcp-gateway   -v /var/r
 
 docker logs -f mcp-gateway
 
+# Status prüfen
+sudo systemctl status gizmo.service
+
+# Logs ansehen
+sudo journalctl -u gizmo.service -f
+
+# Service neu starten
+sudo systemctl restart gizmo.service
+
+# Status prüfen
+sudo systemctl status gizmo.service
+
+# Auto-Start deaktivieren (läuft nicht mehr bei Boot)
+sudo systemctl disable gizmo.service
+
+# Auto-Start wieder aktivieren
+sudo systemctl enable gizmo.service
+
 ```
 
 Anhalten:
 ```bash
-STRG-C //um aus konsole rauszukommen
+
+# Service stoppen
+sudo systemctl stop gizmo.service
+
+# MCP Beenden
 docker stop mcp-gateway
 docker rm mcp-gateway
 
+# Schauen welche container noch laufen
 docker ps -a
 
-docker rm -f //Namen der Container
+# Container für brain und redis stoppen
+docker rm -f # Namen der Container
+
+# Service starten
+sudo systemctl start gizmo.service
 ```
