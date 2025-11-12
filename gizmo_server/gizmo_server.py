@@ -810,18 +810,27 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
         if not full_response:
             full_response = "Entschuldigung, ich konnte keine Antwort generieren."
 
-        # 6. Bereinige temporäre Einträge im Verlauf
+        # 6. Bereinige temporäre Einträge im Verlauf (besserer Filter)
         clean_contents = []
         for entry in contents:
-            # Ignoriere temporäre Emotionseinträge
-            if entry.get("role") == "user" and entry["parts"][0].get("text", "").startswith("Aktuelle Stimmung:"):
+            role = entry.get("role")
+            parts = entry.get("parts", [])
+
+            # Überspringe nur temporäre Systeminfos
+            if role == "user" and parts and parts[0].get("text", "").startswith("Aktuelle Stimmung:"):
                 continue
-            # Ignoriere den KI-Eintrag, der nur "Ich werde darauf achten." sagt
-            if entry.get("role") == "model" and entry["parts"][0].get("text", "") == "Ich werde darauf achten.":
+            if role == "model" and any(p.get("text") == "Ich werde darauf achten." for p in parts):
                 continue
-            # Tool-Ausgaben sind nur temporär für den Lauf
-            if entry.get("role") == "tool":
+            if role == "tool":
                 continue
+
+            # Kombiniere Texte in einem Model-Part, falls mehrere Stücke vorhanden
+            if role == "model":
+                text_parts = [p.get("text", "") for p in parts if "text" in p]
+                combined_text = "".join(text_parts).strip()
+                if combined_text:
+                    entry = {"role": "model", "parts": [{"text": combined_text}]}
+
             clean_contents.append(entry)
 
         # 7. Speichere den bereinigten Verlauf zurück
