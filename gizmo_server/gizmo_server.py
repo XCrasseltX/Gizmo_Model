@@ -821,8 +821,6 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
                 continue
             if role == "model" and any(p.get("text") == "Ich werde darauf achten." for p in parts):
                 continue
-            if role == "tool":
-                continue
 
             # Kombiniere Texte in einem Model-Part, falls mehrere Stücke vorhanden
             if role == "model":

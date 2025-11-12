@@ -44,6 +44,12 @@ sudo systemctl disable gizmo.service
 # Auto-Start wieder aktivieren
 sudo systemctl enable gizmo.service
 
+# redis daten anschauen:
+docker exec -it redis-server redis-cli
+
+keys gizmo:conv:*
+get gizmo:conv:"Conversation-ID" | python3 -m json.tool
+
 ```
 
 Anhalten:
