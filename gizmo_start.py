@@ -102,6 +102,15 @@ def check_prerequisites():
 def start_redis():
     """Startet Redis Container"""
     print(f"{YELLOW}[2/4] Starting Redis...{RESET}")
+
+    # --- Zielverzeichnis je nach OS ---
+    system = platform.system().lower()
+    if system == "windows":
+        base_path = os.path.expanduser(r"~\\redis_data")
+    else:
+        base_path = os.path.expanduser("~/redis_data")
+
+    os.makedirs(base_path, exist_ok=True)
     
     # Prüfe ob Container bereits läuft
     try:
@@ -119,15 +128,24 @@ def start_redis():
     
     # Starte Redis
     try:
-        subprocess.run(
-            ["docker", "run", "--name", "redis-server", "-d", "-p", f"{PORT_REDIS}:6379", "redis"],
-            check=True,
-            capture_output=True,
-            timeout=60
-        )
+        cmd = [
+            "docker", "run",
+            "--name", "redis-server",
+            "-d",
+            "-p", f"{PORT_REDIS}:6379",
+            "-v", f"{base_path}:/data",  # persistentes Volume
+            "redis",
+            "--appendonly", "yes"         # aktiviert AOF-Speicher
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, timeout=60)
         print(f"  {GREEN}✓{RESET} Redis started on port {PORT_REDIS}")
         time.sleep(1)
         return True
+    
+    except subprocess.CalledProcessError as e:
+        print(f"  ✗ Failed to start Redis: {e.stderr.decode(errors='ignore')}")
+        return False
+    
     except Exception as e:
         print(f"  {RED}✗{RESET} Failed to start Redis: {e}")
         return False
