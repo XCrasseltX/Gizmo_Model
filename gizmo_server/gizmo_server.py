@@ -783,11 +783,34 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
                 "timestamp": created_ts + 1
             })
 
-            await memory_client.save_meta(
-                request.conversation_id,
-                created_ts,
-                last_message="Verstanden, ich bin bereit."
-            )
+            # --- Metadaten laden oder erstellen ---
+            meta = await memory_client.get_meta(request.conversation_id)
+
+            if meta is None:
+                # Neuer Chat → Metadaten erzeugen
+                created_ts = int(time.time())
+                last_message = request.text  # User message als first message
+                title = "Chat"
+
+                await memory_client.save_meta(
+                    request.conversation_id,
+                    created_ts,
+                    last_message,
+                    title
+                )
+            else:
+                # Bestehenden Chat aktualisieren
+                created_ts = meta["created"]
+                last_message = full_response  # AI Antwort als letzter message
+                title = meta.get("title", "Chat")
+
+                await memory_client.save_meta(
+                    request.conversation_id,
+                    created_ts,
+                    last_message,
+                    title
+                )
+
         
         # 4. Füge die aktuelle User-Nachricht hinzu (persistent)
         # Die eigentliche User-Anfrage wird ZUERST hinzugefügt.
