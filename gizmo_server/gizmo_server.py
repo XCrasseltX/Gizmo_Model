@@ -783,33 +783,14 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
                 "timestamp": created_ts + 1
             })
 
-            # --- Metadaten laden oder erstellen ---
             meta = await memory_client.get_meta(request.conversation_id)
+            created_ts = meta["created"] if meta else int(time.time())
 
-            if meta is None:
-                # Neuer Chat → Metadaten erzeugen
-                created_ts = int(time.time())
-                last_message = request.text  # User message als first message
-                title = "Chat"
-
-                await memory_client.save_meta(
-                    request.conversation_id,
-                    created_ts,
-                    last_message,
-                    title
-                )
-            else:
-                # Bestehenden Chat aktualisieren
-                created_ts = meta["created"]
-                last_message = full_response  # AI Antwort als letzter message
-                title = meta.get("title", "Chat")
-
-                await memory_client.save_meta(
-                    request.conversation_id,
-                    created_ts,
-                    last_message,
-                    title
-                )
+            await memory_client.save_meta(
+                request.conversation_id,
+                created_ts,
+                full_response
+            )
 
         
         # 4. Füge die aktuelle User-Nachricht hinzu (persistent)
@@ -875,8 +856,8 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
         # 7. Speichere den bereinigten Verlauf zurück
         await memory_client.save_meta(
             request.conversation_id,
-            created_ts=memory_client[0]["timestamp"],
-            last_message=full_response
+            created_ts,
+            full_response
         )
         logger.info(f"💾 Verlauf für {request.conversation_id} gespeichert: {len(clean_contents)} Einträge")
 
