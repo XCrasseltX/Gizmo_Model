@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import redis
+import copy
+from datetime import datetime
 
 load_dotenv()
 
@@ -71,6 +73,30 @@ class ConversationMemory:
 
     def _key(self, conversation_id: str) -> str:
         return f"gizmo:conv:{conversation_id}"
+    
+    def _meta_key(self, conversation_id: str) -> str:
+        return f"gizmo:convmeta:{conversation_id}"
+
+    async def save_meta(self, conversation_id: str, meta: dict):
+        """Speichert kleine Meta-Infos für die Chatliste."""
+        try:
+            key = self._meta_key(conversation_id)
+            data = json.dumps(meta)
+            await asyncio.to_thread(self.r.setex, key, self.ttl_seconds, data)
+        except Exception as e:
+            logger.warning(f"Could not save meta to Redis: {e}")
+
+    async def load_meta(self, conversation_id: str) -> Optional[dict]:
+        """Lädt Meta-Infos, falls vorhanden."""
+        try:
+            key = self._meta_key(conversation_id)
+            data = await asyncio.to_thread(self.r.get, key)
+            if data:
+                return json.loads(data)
+            return None
+        except Exception as e:
+            logger.warning(f"Could not load meta from Redis: {e}")
+            return None
 
     async def load_history(self, conversation_id: str) -> list:
         try:
@@ -415,7 +441,9 @@ class GeminiClient:
         self.tools = tools
         logger.info(f"Registriert {len(tools)} MCP Tools für Gemini")
 
-    async def _stream_gemini_response(self, client, url, params, headers, body, contents_list, out_function_calls: list):
+    async def _stream_gemini_response(self, client, url, params, headers, body,
+                                      contents_list, out_function_calls: list,
+                                      out_history_entries: list):
         """
         Interne Hilfsfunktion, um eine einzelne API-Anfrage zu streamen
         und die Antworten (Text und Tool-Calls) zu sammeln.
@@ -477,11 +505,15 @@ class GeminiClient:
         # Füge die gesamte Antwort der KI (Text und/oder Tool-Calls) zum Verlauf hinzu
         if model_response_part["parts"]:
             contents_list.append(model_response_part)
+            # NEU: komplette Model-Antwort inkl. functionCall für Redis merken
+            out_history_entries.append(copy.deepcopy(model_response_part))
 
-    async def generate_with_tools(self, contents: list, mcp_client, emotion: str) -> AsyncGenerator[str, None]:
+    async def generate_with_tools(self, contents: list, mcp_client, emotion: str,
+                                  out_history_entries: list) -> AsyncGenerator[str, None]:
         """
-        Streamt Text + Tool Calls. Verwendet und aktualisiert den übergebenen 'contents' in-place.
-        Die aktuelle Emotion wird als TEMPORÄRER Eintrag in 'contents' hinzugefügt.
+        Streamt Text + Tool Calls.
+        out_history_entries: wird mit neuen 'model' und 'tool' Einträgen gefüllt,
+        die später in Redis gespeichert werden.
         """
         
         url = f"{self.base_url}/models/{self.model}:streamGenerateContent"
@@ -524,8 +556,9 @@ class GeminiClient:
             # Sie `yield`et Text direkt an den User und gibt Tool-Calls zurück
             function_calls = []
 
-            async for text_chunk in self. _stream_gemini_response(
-                client, url, params, headers, body_r1, contents, function_calls
+            async for text_chunk in self._stream_gemini_response(
+                client, url, params, headers, body_r1,
+                contents, function_calls, out_history_entries
             ):
                 yield text_chunk # Streamt den Text-Chunk weiter an den User
 
@@ -565,7 +598,7 @@ class GeminiClient:
                     logger.error(f"Tool {tool_name} fehlgeschlagen: {error}")
 
                 # Füge das Tool-Ergebnis zum Verlauf (contents) hinzu
-                contents.append({
+                tool_entry = {
                     "role": "tool",
                     "parts": [
                         {
@@ -575,7 +608,13 @@ class GeminiClient:
                             }
                         }
                     ]
-                })
+                }
+
+                # Für die nächste Gemini-Runde
+                contents.append(tool_entry)
+                # Für Redis (volle History)
+                out_history_entries.append(copy.deepcopy(tool_entry))
+
 
             # --- Schritt 5: Runde 2 (Tool-Ergebnisse -> KI) ---
             logger.info("Starte Runde 2: Sende Tool-Ergebnisse an Gemini für finale Antwort.")
@@ -590,8 +629,9 @@ class GeminiClient:
             # Wir rufen dieselbe Stream-Funktion erneut auf.
             # Diesmal wird der `yield`ete Text die finale, zusammengefasste Antwort sein.
             # Eventuelle (unerwartete) Tool-Calls in Runde 2 ignorieren wir hier.
-            async for text_chunk in self. _stream_gemini_response(
-                client, url, params, headers, body_r2, contents, [] 
+            async for text_chunk in self._stream_gemini_response(
+                client, url, params, headers, body_r2,
+                contents, [], out_history_entries
             ):
                 yield text_chunk
             
@@ -601,8 +641,42 @@ class GeminiClient:
 coach = CppCoachClient(CPP_COACH_URL)
 gemini = GeminiClient(GEMINI_API_KEY, GEMINI_MODEL)
 mcp_client = MCPGatewayClient(gateway_host="localhost", gateway_port=PORT_MCP_GATEWAY)
-#mcp_client = DockerMCPClient() 
 memory_client = ConversationMemory(REDIS_URL)
+
+def build_gemini_contents(full_history: list) -> list:
+    """
+    Baut aus der vollen Redis-History eine 'saubere' History
+    nur mit:
+      - role: user / model -> nur Text (text parts zusammengefügt)
+      - role: tool -> unverändert (Gemini-konforme functionResponse)
+    """
+    safe_contents = []
+
+    for entry in full_history:
+        role = entry.get("role")
+        parts = entry.get("parts", [])
+
+        if role in ("user", "model"):
+            texts = [
+                p.get("text", "")
+                for p in parts
+                if isinstance(p, dict) and "text" in p
+            ]
+            if not texts:
+                continue
+            safe_contents.append({
+                "role": role,
+                "parts": [{"text": "".join(texts)}]
+            })
+
+        elif role == "tool":
+            # Tool-Ergebnisse im Gemini-Format (functionResponse) direkt durchreichen
+            safe_contents.append(entry)
+
+        # andere Rollen ignorieren wir bewusst
+
+    return safe_contents
+
 
 
 @app.on_event("startup")
@@ -687,56 +761,65 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
         emotion = str(enriched["emotion"])
         system_prompt = prompt 
 
-        # 2. Lade den persistenten Verlauf aus Redis
-        contents = await memory_client.load_history(request.conversation_id)
-        
-        # 3. Wenn der Verlauf leer ist, initialisiere nur den persistenten System-Prompt
-        if not contents:
-            logger.info(f"Starte Konversation {request.conversation_id}: Initialisiere System-Prompt.")
+        # 2. Lade den persistenten Verlauf aus Redis (volle History)
+        full_history = await memory_client.load_history(request.conversation_id)
             
-            # NUR DER PERSISTENTE SYSTEM-PROMPT WIRD GESPEICHERT
-            contents.append({"role": "user", "parts": [{"text": system_prompt}]}) 
-            contents.append({"role": "model", "parts": [{"text": "Verstanden, ich bin bereit."}]})
-        
-        # 4. Füge die aktuelle User-Nachricht hinzu (persistent)
-        # Die eigentliche User-Anfrage wird ZUERST hinzugefügt.
-        contents.append({"role": "user", "parts": [{"text": request.text}]})
+        # 3. Wenn der Verlauf leer ist, initialisiere nur den persistenten System-Prompt
+        if not full_history:
+            logger.info(f"Starte Konversation {request.conversation_id}: Initialisiere System-Prompt.")
+            full_history.append({"role": "user", "parts": [{"text": system_prompt}]})
+            full_history.append({"role": "model", "parts": [{"text": "Verstanden, ich bin bereit."}]})
+            
+        # 4. Füge die aktuelle User-Nachricht zur vollen History hinzu (persistent)
+        user_entry = {"role": "user", "parts": [{"text": request.text}]}
+        full_history.append(user_entry)
 
-        # 5. Führe Gemini-Generierung durch
+
+        # 5. Baue 'saubere' History nur für Gemini (Text + Tool-Responses)
+        gemini_contents = build_gemini_contents(full_history)
+
+        # 6. Führe Gemini-Generierung durch und sammle neue History-Einträge
         full_response = ""
-        # Wir übergeben den Verlauf, den MCP Client und die AKTUELLE Emotion
-        async for chunk in gemini.generate_with_tools(contents, mcp_client, emotion): 
+        new_history_entries = []
+
+        async for chunk in gemini.generate_with_tools(
+            gemini_contents, mcp_client, emotion, new_history_entries
+        ):
             full_response += chunk
 
         if not full_response:
             full_response = "Entschuldigung, ich konnte keine Antwort generieren."
 
-        # 6. Bereinige temporäre Einträge im Verlauf (besserer Filter)
-        clean_contents = []
-        for entry in contents:
-            role = entry.get("role")
-            parts = entry.get("parts", [])
+        # 7. Volle History um neue Model/Tool-Einträge erweitern
+        full_history.extend(new_history_entries)
 
-            # Überspringe nur temporäre Systeminfos
-            if role == "user" and parts and parts[0].get("text", "").startswith("Aktuelle Stimmung:"):
-                continue
-            if role == "model" and any(p.get("text") == "Ich werde darauf achten." for p in parts):
-                continue
+        # 8. History in Redis speichern
+        await memory_client.save_history(request.conversation_id, full_history)
+        logger.info(f"💾 Verlauf für {request.conversation_id} gespeichert: {len(full_history)} Einträge")
 
-            # Kombiniere Texte in einem Model-Part, falls mehrere Stücke vorhanden
-            if role == "model":
-                text_parts = [p.get("text", "") for p in parts if "text" in p]
-                combined_text = "".join(text_parts).strip()
-                if combined_text:
-                    entry = {"role": "model", "parts": [{"text": combined_text}]}
+        # 9. Kleine Meta-Info für die Chatliste speichern
+        last_model_text = ""
+        for entry in reversed(full_history):
+            if entry.get("role") == "model":
+                parts = entry.get("parts", [])
+                texts = [
+                    p.get("text", "")
+                    for p in parts
+                    if isinstance(p, dict) and "text" in p
+                ]
+                if texts:
+                    last_model_text = "".join(texts)
+                    break
 
-            clean_contents.append(entry)
+        meta = {
+            "conversation_id": request.conversation_id,
+            "last_user_text": request.text,
+            "last_model_text": last_model_text[:200],
+            "updated_at": datetime.utcnow().isoformat() + "Z"
+        }
+        await memory_client.save_meta(request.conversation_id, meta)
 
-        # 7. Speichere den bereinigten Verlauf zurück
-        await memory_client.save_history(request.conversation_id, clean_contents)
-        logger.info(f"💾 Verlauf für {request.conversation_id} gespeichert: {len(clean_contents)} Einträge")
-
-        logger.info(f"Antwort generiert. Neuer bereinigter Verlauf: {len(contents)} Teile.")
+        logger.info(f"Antwort generiert. Verlaufseinträge: {len(full_history)}")
         return ConversationResponse(response=full_response, conversation_id=request.conversation_id)
 
     except HTTPException:
