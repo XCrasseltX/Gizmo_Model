@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import redis
-import time
 
 load_dotenv()
 
@@ -63,49 +62,45 @@ class HealthResponse(BaseModel):
     gemini_configured: bool
 
 # --- NEU: Redis Client für Memory ---
-class ChatStorage:
-    """Speichert vollständige Chats, Metadaten & Summaries."""
-
+class ConversationMemory:
+    """Speichert und ruft den Konversationsverlauf (contents) in Redis ab."""
+    
     def __init__(self, redis_url: str):
         self.r = redis.from_url(redis_url, decode_responses=True)
+        self.ttl_seconds = 3600  # Verlauf nach 1 Stunde löschen (Time To Live)
 
-    def key_chat(self, cid): return f"gizmo:chat:{cid}"
-    def key_meta(self, cid): return f"gizmo:meta:{cid}"
-    def key_summary(self, cid): return f"gizmo:summary:{cid}"
+    def _key(self, conversation_id: str) -> str:
+        return f"gizmo:conv:{conversation_id}"
 
-    async def load_messages(self, cid: str) -> list:
+    async def load_history(self, conversation_id: str) -> list:
         try:
-            raw = await asyncio.to_thread(self.r.get, self.key_chat(cid))
-            if raw:
-                return json.loads(raw)
+            key = self._key(conversation_id)
+            data = await asyncio.to_thread(self.r.get, key)
+            if data:
+                return json.loads(data)
             return []
-        except Exception:
-            return []
+        except Exception as e:
+            logger.warning(f"Redis unavailable, using empty history: {e}")
+            return []  # Fallback auf leeren Verlauf
 
-    async def save_messages(self, cid: str, messages: list):
-        await asyncio.to_thread(self.r.set, self.key_chat(cid), json.dumps(messages))
+    async def save_history(self, conversation_id: str, contents: list):
+        try:
+            key = self._key(conversation_id)
+            data = json.dumps(contents)
+            await asyncio.to_thread(self.r.setex, key, self.ttl_seconds, data)
+        except Exception as e:
+            logger.warning(f"Could not save to Redis: {e}")
+        
+    async def connect(self):
+        """Einfacher Check, ob Redis verfügbar ist"""
+        try:
+            await asyncio.to_thread(self.r.ping)
+            logger.info("✅ Redis Memory Client verbunden")
+            return True
+        except Exception as e:
+            logger.error(f"⚠️ Redis Memory Client Fehler: {e}")
+            return False
 
-    async def save_meta(self, cid: str, created_ts: int, last_message: str, title="Chat"):
-        meta = {
-            "id": cid,
-            "created": created_ts,
-            "updated": int(time.time()),
-            "title": title,
-            "last_message": last_message
-        }
-        await asyncio.to_thread(self.r.set, self.key_meta(cid), json.dumps(meta))
-
-    async def save_summary(self, cid: str, summary_text: str):
-        await asyncio.to_thread(self.r.set, self.key_summary(cid), summary_text)
-
-    async def get_meta(self, cid: str):
-        raw = await asyncio.to_thread(self.r.get, self.key_meta(cid))
-        if not raw:
-            return None
-        return json.loads(raw)
-
-    async def ping(self):
-        await asyncio.to_thread(self.r.ping)
 
 # --- C++ Coach Client ---
 class CppCoachClient:
@@ -164,8 +159,6 @@ class MCPGatewayClient:
         self.tools = []
         self.message_id = 0
         self.session_id = None
-        self.collected_toolcalls = []   # hier sammeln wir die letzten Toolcalls
-
     
     async def connect(self):
         """Verbinde mit dem Gateway"""
@@ -407,8 +400,6 @@ class MCPGatewayClient:
         if self.client:
             await self.client.aclose()
 
-
-
 # --- Gemini Client ---
 class GeminiClient:
     """Client für Google Gemini API mit Streaming-Unterstützung"""
@@ -492,89 +483,40 @@ class GeminiClient:
         Streamt Text + Tool Calls. Verwendet und aktualisiert den übergebenen 'contents' in-place.
         Die aktuelle Emotion wird als TEMPORÄRER Eintrag in 'contents' hinzugefügt.
         """
-
-        # ================================================================
-        # STEP 0 – Converter für Redis → Gemini Format
-        # ================================================================
-        def convert_to_gemini(entry):
-            # Bereits korrekt
-            if "parts" in entry:
-                return entry
-
-            role = entry.get("role", "user")
-
-            # Toolcalls -> nicht an Gemini senden
-            if role == "tool":
-                return None
-
-            # Normale textbasierte Nachrichten
-            if "text" in entry:
-                return {
-                    "role": role,
-                    "parts": [{"text": entry["text"]}]
-                }
-
-            return None
         
-        # ================================================================
-        # STEP 1 – Gesamten Verlauf konvertieren
-        # ================================================================
-        formatted = []
-        for e in contents:
-            c = convert_to_gemini(e)
-            if c:
-                formatted.append(c)
-
-        contents = formatted
-
-        # ================================================================
-        # STEP 2 – Extrahiere letzte User-Nachricht (IMMER im Gemini-Format)
-        # ================================================================
-        user_text_entry = contents.pop()  
-        current_user_text = user_text_entry["parts"][0]["text"]
-
-        # ================================================================
-        # STEP 3 – Temporäre Emotion hinzufügen
-        # ================================================================
-        contents.append({
-            "role": "user",
-            "parts": [{"text": f"Aktuelle Stimmung: {emotion}"}]
-        })
-        contents.append({
-            "role": "model",
-            "parts": [{"text": "Ich werde darauf achten."}]
-        })
-
-        # User-Message wieder anhängen
-        contents.append(user_text_entry)
-
-        # ================================================================
-        # HTTP Client
-        # ================================================================
         url = f"{self.base_url}/models/{self.model}:streamGenerateContent"
         params = {"key": self.api_key, "alt": "sse"}
         headers = {"Content-Type": "application/json"}
         tool_config = {"function_declarations": self.tools} if self.tools else None
         
+        # HIER ERFOLGT DIE VORBEREITUNG DER INHALTE VOR DER ERSTEN RUNDE
+        # -----------------------------------------------------------------------
+        
+        # 1. Füge die aktuelle User-Nachricht hinzu (wird vom Endpunkt gemacht)
+        # 2. Füge die TEMPORÄRE Emotions-Info hinzu, damit Gemini diese EINE Runde beachtet.
+        # WICHTIG: Da diese Logik VOR dem Gemini-Aufruf erfolgt, muss der Endpunkt
+        # nur den History-Teil des Contents übergeben. Wir verschieben das Anfügen
+        # der User-Nachricht HIERHER.
+        
+        # Der User-Text ist der letzte Eintrag im contents-Array, den wir hier extrahieren.
+        user_text_entry = contents.pop() 
+        current_user_text = user_text_entry["parts"][0]["text"]
+
+        # Füge die aktuelle, dynamische Emotion als temporären Kontext hinzu
+        contents.append({"role": "user", "parts": [{"text": f"Aktuelle Stimmung: {emotion}"}]})
+        contents.append({"role": "model", "parts": [{"text": "Ich werde darauf achten."}]})
+        
+        # Füge die eigentliche User-Nachricht hinzu
+        contents.append(user_text_entry)
+        
+        # -----------------------------------------------------------------------
+        
         async with httpx.AsyncClient(timeout=60.0) as client:
             
-            # ============================================================
-            # RUNDE 1 – normale Antwort + mögliche Toolcalls
-            # ============================================================
+            # --- Schritt 1: Runde 1 (Aktueller Verlauf + TEMPORÄRER Emotion -> KI) ---
             logger.info(f"Starte Runde 1. Aktuelle dynamische Emotion: {emotion}")
-            # Vor dem Absenden an Gemini ungültige Rollen herausfiltern
-            allowed_roles = ("user", "model")
-            safe_contents = [
-                {
-                    "role": c["role"],
-                    "parts": c.get("parts", [{"text": c.get("text", "")}])
-                }
-                for c in contents
-                if c.get("role") in allowed_roles
-            ]
-
             body_r1 = {
-                "contents": safe_contents,
+                "contents": contents, 
                 "tools": [tool_config] if tool_config else []
             }
 
@@ -587,20 +529,13 @@ class GeminiClient:
             ):
                 yield text_chunk # Streamt den Text-Chunk weiter an den User
 
-            # ============================================================
-            # Keine Tools → fertig
-            # ============================================================
+            # --- Schritt 3: Prüfen, ob Tools aufgerufen wurden ---
             if not function_calls:
                 logger.info("Runde 1: Keine Tool-Calls. Antwort ist final.")
                 return  # Fertig, aller Text wurde bereits gestreamt
 
-            # ============================================================
-            # RUNDE 1.5 – Tools ausführen
-            # ============================================================
-            logger.info(f"Führe {len(function_calls)} Tool Call(s) aus.")
-
-            # Die Liste der Toolcalls am MCP-Client für diesen Run zurücksetzen
-            mcp_client.collected_toolcalls = []
+            # --- Schritt 4: Tool-Ausführung (Zwischenschritt) ---
+            logger.info(f"Runde 1: Führe {len(function_calls)} Tool Call(s) aus.")
             
             for call in function_calls:
                 tool_name = call["name"]
@@ -614,51 +549,41 @@ class GeminiClient:
                 
                 # *** DAS IST DER WICHTIGSTE TEIL ***
                 # Formatiere das Tool-Ergebnis für die API (Runde 2)
+                
+                tool_result_data = {}
                 if result.get("success"):
+                    output = result.get("output", "")
+                    # Versuche, das Ergebnis als JSON zu laden, da MCP oft JSON-Strings liefert
                     try:
-                        data = json.loads(result.get("output", ""))
-                    except:
-                        data = {"content": str(result.get("output", ""))}
+                        tool_result_data = json.loads(output)
+                    except (json.JSONDecodeError, TypeError):
+                        # Wenn es kein JSON ist, verpacke es einfach
+                        tool_result_data = {"content": str(output)}
                 else:
-                    err = result.get("error", "Unbekannter Fehler")
-                    data = {"error": err}
-                    logger.error(f"Toolfehler: {err}")
+                    error = result.get("error", "Unbekannter Fehler")
+                    tool_result_data = {"error": error}
+                    logger.error(f"Tool {tool_name} fehlgeschlagen: {error}")
 
-                # ❗ Hier sammeln wir jetzt sauber alles
-                mcp_client.collected_toolcalls.append({
-                    "name": tool_name,
-                    "args": tool_args,
-                    "result_data": data
-                })
-
+                # Füge das Tool-Ergebnis zum Verlauf (contents) hinzu
                 contents.append({
                     "role": "tool",
-                    "parts": [{
-                        "functionResponse": {
-                            "name": tool_name,
-                            "response": data
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "name": tool_name,
+                                "response": tool_result_data
+                            }
                         }
-                    }]
+                    ]
                 })
 
-            # ============================================================
-            # RUNDE 2 – finale Antwort von Gemini
-            # ============================================================
+            # --- Schritt 5: Runde 2 (Tool-Ergebnisse -> KI) ---
             logger.info("Starte Runde 2: Sende Tool-Ergebnisse an Gemini für finale Antwort.")
             
             # Der Body enthält jetzt den *gesamten* Verlauf
-            safe_contents_r2 = [
-                {
-                    "role": c["role"],
-                    "parts": c.get("parts", [{"text": c.get("text", "")}])
-                }
-                for c in contents
-                if c.get("role") in allowed_roles
-            ]
-
             body_r2 = {
-                "contents": safe_contents_r2,
-                "tools": [tool_config] if tool_config else []
+                "contents": contents,
+                "tools": [tool_config] if tool_config else [] # Tools müssen erneut gesendet werden
             }
 
             # --- Schritt 6: Finale Antwort streamen ---
@@ -677,14 +602,13 @@ coach = CppCoachClient(CPP_COACH_URL)
 gemini = GeminiClient(GEMINI_API_KEY, GEMINI_MODEL)
 mcp_client = MCPGatewayClient(gateway_host="localhost", gateway_port=PORT_MCP_GATEWAY)
 #mcp_client = DockerMCPClient() 
-memory_client = ChatStorage(REDIS_URL)
+memory_client = ConversationMemory(REDIS_URL)
 
 
 @app.on_event("startup")
 async def startup():
     # Verbinde Memory
-    await memory_client.ping()
-    logger.info("✅ Redis ChatStorage verbunden")
+    await memory_client.connect() 
     # Verbinde mit Gateway
     await mcp_client.connect()
     
@@ -764,42 +688,19 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
         system_prompt = prompt 
 
         # 2. Lade den persistenten Verlauf aus Redis
-        contents = await memory_client.load_messages(request.conversation_id)
+        contents = await memory_client.load_history(request.conversation_id)
         
         # 3. Wenn der Verlauf leer ist, initialisiere nur den persistenten System-Prompt
         if not contents:
-            created_ts = int(time.time())
-
-            # System Prompt wird immer gespeichert
-            contents.append({
-                "role": "system",
-                "text": prompt,
-                "timestamp": created_ts
-            })
-
-            contents.append({
-                "role": "model",
-                "text": "Verstanden, ich bin bereit.",
-                "timestamp": created_ts + 1
-            })
-
-            meta = await memory_client.get_meta(request.conversation_id)
-            created_ts = meta["created"] if meta else int(time.time())
-
-            await memory_client.save_meta(
-                request.conversation_id,
-                created_ts,
-                full_response
-            )
-
+            logger.info(f"Starte Konversation {request.conversation_id}: Initialisiere System-Prompt.")
+            
+            # NUR DER PERSISTENTE SYSTEM-PROMPT WIRD GESPEICHERT
+            contents.append({"role": "user", "parts": [{"text": system_prompt}]}) 
+            contents.append({"role": "model", "parts": [{"text": "Verstanden, ich bin bereit."}]})
         
         # 4. Füge die aktuelle User-Nachricht hinzu (persistent)
         # Die eigentliche User-Anfrage wird ZUERST hinzugefügt.
-        contents.append({
-            "role": "user",
-            "text": request.text,
-            "timestamp": int(time.time())
-        })
+        contents.append({"role": "user", "parts": [{"text": request.text}]})
 
         # 5. Führe Gemini-Generierung durch
         full_response = ""
@@ -809,28 +710,6 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
 
         if not full_response:
             full_response = "Entschuldigung, ich konnte keine Antwort generieren."
-
-        # --- HIER Punkt 6 EINSETZEN ---
-
-        # 6A: Modellantwort speichern (normale KI-Antwort)
-        model_ts = int(time.time())
-        contents.append({
-            "role": "model",
-            "text": full_response,
-            "timestamp": model_ts
-        })
-
-        # 6B: Toolcalls speichern (falls welche passiert sind)
-        # generate_with_tools hat eine Liste mit toolcalls geliefert
-        for call in mcp_client.collected_toolcalls:
-            contents.append({
-                "role": "tool",
-                "tool_name": call["name"],
-                "request": call["args"],
-                "response": call.get("result_data", {}),
-                "timestamp": int(time.time())
-            })
-    
 
         # 6. Bereinige temporäre Einträge im Verlauf (besserer Filter)
         clean_contents = []
@@ -854,47 +733,17 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
             clean_contents.append(entry)
 
         # 7. Speichere den bereinigten Verlauf zurück
-        await memory_client.save_meta(
-            request.conversation_id,
-            created_ts,
-            full_response
-        )
+        await memory_client.save_history(request.conversation_id, clean_contents)
         logger.info(f"💾 Verlauf für {request.conversation_id} gespeichert: {len(clean_contents)} Einträge")
 
         logger.info(f"Antwort generiert. Neuer bereinigter Verlauf: {len(contents)} Teile.")
         return ConversationResponse(response=full_response, conversation_id=request.conversation_id)
-    
-        # todo: summary generation after 6 messages
 
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Fehler bei Konversationsverarbeitung")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/conversation/stream")
-# --- Streaming-Haupt-Funktion ---
-async def process_conversation_stream(request: ConversationRequest):
-    """Streaming Endpoint: sendet Text-Events Stück für Stück an Client"""
-    async def event_generator():
-        try:
-            enriched = await coach.get_enriched_prompt(request.text)
-            system_prompt = enriched["prompt"] + enriched["emotion"]
-
-            print(system_prompt)
-
-            async for chunk in gemini.generate_stream(system_prompt, request.text):
-                yield f"data: {json.dumps({'text': chunk})}\n\n"
-
-            yield "data: [DONE]\n\n"
-
-        except Exception as e:
-            logger.exception("Stream Error")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
 
 if __name__ == "__main__":
     import uvicorn
