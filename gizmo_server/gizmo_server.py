@@ -490,37 +490,75 @@ class GeminiClient:
         Streamt Text + Tool Calls. Verwendet und aktualisiert den übergebenen 'contents' in-place.
         Die aktuelle Emotion wird als TEMPORÄRER Eintrag in 'contents' hinzugefügt.
         """
+
+        # ================================================================
+        # STEP 0 – Converter für Redis → Gemini Format
+        # ================================================================
+        def convert_to_gemini(entry):
+            # Bereits korrekt
+            if "parts" in entry:
+                return entry
+
+            role = entry.get("role", "user")
+
+            # Toolcalls -> nicht an Gemini senden
+            if role == "tool":
+                return None
+
+            # Normale textbasierte Nachrichten
+            if "text" in entry:
+                return {
+                    "role": role,
+                    "parts": [{"text": entry["text"]}]
+                }
+
+            return None
         
+        # ================================================================
+        # STEP 1 – Gesamten Verlauf konvertieren
+        # ================================================================
+        formatted = []
+        for e in contents:
+            c = convert_to_gemini(e)
+            if c:
+                formatted.append(c)
+
+        contents = formatted
+
+        # ================================================================
+        # STEP 2 – Extrahiere letzte User-Nachricht (IMMER im Gemini-Format)
+        # ================================================================
+        user_text_entry = contents.pop()  
+        current_user_text = user_text_entry["parts"][0]["text"]
+
+        # ================================================================
+        # STEP 3 – Temporäre Emotion hinzufügen
+        # ================================================================
+        contents.append({
+            "role": "user",
+            "parts": [{"text": f"Aktuelle Stimmung: {emotion}"}]
+        })
+        contents.append({
+            "role": "model",
+            "parts": [{"text": "Ich werde darauf achten."}]
+        })
+
+        # User-Message wieder anhängen
+        contents.append(user_text_entry)
+
+        # ================================================================
+        # HTTP Client
+        # ================================================================
         url = f"{self.base_url}/models/{self.model}:streamGenerateContent"
         params = {"key": self.api_key, "alt": "sse"}
         headers = {"Content-Type": "application/json"}
         tool_config = {"function_declarations": self.tools} if self.tools else None
         
-        # HIER ERFOLGT DIE VORBEREITUNG DER INHALTE VOR DER ERSTEN RUNDE
-        # -----------------------------------------------------------------------
-        
-        # 1. Füge die aktuelle User-Nachricht hinzu (wird vom Endpunkt gemacht)
-        # 2. Füge die TEMPORÄRE Emotions-Info hinzu, damit Gemini diese EINE Runde beachtet.
-        # WICHTIG: Da diese Logik VOR dem Gemini-Aufruf erfolgt, muss der Endpunkt
-        # nur den History-Teil des Contents übergeben. Wir verschieben das Anfügen
-        # der User-Nachricht HIERHER.
-        
-        # Der User-Text ist der letzte Eintrag im contents-Array, den wir hier extrahieren.
-        user_text_entry = contents.pop() 
-        current_user_text = user_text_entry["parts"][0]["text"]
-
-        # Füge die aktuelle, dynamische Emotion als temporären Kontext hinzu
-        contents.append({"role": "user", "parts": [{"text": f"Aktuelle Stimmung: {emotion}"}]})
-        contents.append({"role": "model", "parts": [{"text": "Ich werde darauf achten."}]})
-        
-        # Füge die eigentliche User-Nachricht hinzu
-        contents.append(user_text_entry)
-        
-        # -----------------------------------------------------------------------
-        
         async with httpx.AsyncClient(timeout=60.0) as client:
             
-            # --- Schritt 1: Runde 1 (Aktueller Verlauf + TEMPORÄRER Emotion -> KI) ---
+            # ============================================================
+            # RUNDE 1 – normale Antwort + mögliche Toolcalls
+            # ============================================================
             logger.info(f"Starte Runde 1. Aktuelle dynamische Emotion: {emotion}")
             body_r1 = {
                 "contents": contents, 
@@ -536,13 +574,17 @@ class GeminiClient:
             ):
                 yield text_chunk # Streamt den Text-Chunk weiter an den User
 
-            # --- Schritt 3: Prüfen, ob Tools aufgerufen wurden ---
+            # ============================================================
+            # Keine Tools → fertig
+            # ============================================================
             if not function_calls:
                 logger.info("Runde 1: Keine Tool-Calls. Antwort ist final.")
                 return  # Fertig, aller Text wurde bereits gestreamt
 
-            # --- Schritt 4: Tool-Ausführung (Zwischenschritt) ---
-            logger.info(f"Runde 1: Führe {len(function_calls)} Tool Call(s) aus.")
+            # ============================================================
+            # RUNDE 1.5 – Tools ausführen
+            # ============================================================
+            logger.info(f"Führe {len(function_calls)} Tool Call(s) aus.")
             
             for call in function_calls:
                 tool_name = call["name"]
@@ -556,35 +598,29 @@ class GeminiClient:
                 
                 # *** DAS IST DER WICHTIGSTE TEIL ***
                 # Formatiere das Tool-Ergebnis für die API (Runde 2)
-                
-                tool_result_data = {}
                 if result.get("success"):
-                    output = result.get("output", "")
-                    # Versuche, das Ergebnis als JSON zu laden, da MCP oft JSON-Strings liefert
                     try:
-                        tool_result_data = json.loads(output)
-                    except (json.JSONDecodeError, TypeError):
-                        # Wenn es kein JSON ist, verpacke es einfach
-                        tool_result_data = {"content": str(output)}
+                        data = json.loads(result.get("output", ""))
+                    except:
+                        data = {"content": str(result.get("output", ""))}
                 else:
-                    error = result.get("error", "Unbekannter Fehler")
-                    tool_result_data = {"error": error}
-                    logger.error(f"Tool {tool_name} fehlgeschlagen: {error}")
+                    err = result.get("error", "Unbekannter Fehler")
+                    data = {"error": err}
+                    logger.error(f"Toolfehler: {err}")
 
-                # Füge das Tool-Ergebnis zum Verlauf (contents) hinzu
                 contents.append({
                     "role": "tool",
-                    "parts": [
-                        {
-                            "functionResponse": {
-                                "name": tool_name,
-                                "response": tool_result_data
-                            }
+                    "parts": [{
+                        "functionResponse": {
+                            "name": tool_name,
+                            "response": data
                         }
-                    ]
+                    }]
                 })
 
-            # --- Schritt 5: Runde 2 (Tool-Ergebnisse -> KI) ---
+            # ============================================================
+            # RUNDE 2 – finale Antwort von Gemini
+            # ============================================================
             logger.info("Starte Runde 2: Sende Tool-Ergebnisse an Gemini für finale Antwort.")
             
             # Der Body enthält jetzt den *gesamten* Verlauf
