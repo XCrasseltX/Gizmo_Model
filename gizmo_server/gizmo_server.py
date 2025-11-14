@@ -806,7 +806,7 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
 
         # 6B: Toolcalls speichern (falls welche passiert sind)
         # generate_with_tools hat eine Liste mit toolcalls geliefert
-        for call in mcp_client.collected_toolcalls:
+        for call in mcp_client.fetch_tools:
             contents.append({
                 "role": "tool",
                 "tool_name": call["name"],
