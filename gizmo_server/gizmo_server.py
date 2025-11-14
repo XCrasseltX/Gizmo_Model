@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import redis
+import time
 
 load_dotenv()
 
@@ -62,45 +63,49 @@ class HealthResponse(BaseModel):
     gemini_configured: bool
 
 # --- NEU: Redis Client für Memory ---
-class ConversationMemory:
-    """Speichert und ruft den Konversationsverlauf (contents) in Redis ab."""
-    
+class ChatStorage:
+    """Speichert vollständige Chats, Metadaten & Summaries."""
+
     def __init__(self, redis_url: str):
         self.r = redis.from_url(redis_url, decode_responses=True)
-        self.ttl_seconds = 3600  # Verlauf nach 1 Stunde löschen (Time To Live)
 
-    def _key(self, conversation_id: str) -> str:
-        return f"gizmo:conv:{conversation_id}"
+    def key_chat(self, cid): return f"gizmo:chat:{cid}"
+    def key_meta(self, cid): return f"gizmo:meta:{cid}"
+    def key_summary(self, cid): return f"gizmo:summary:{cid}"
 
-    async def load_history(self, conversation_id: str) -> list:
+    async def load_messages(self, cid: str) -> list:
         try:
-            key = self._key(conversation_id)
-            data = await asyncio.to_thread(self.r.get, key)
-            if data:
-                return json.loads(data)
+            raw = await asyncio.to_thread(self.r.get, self.key_chat(cid))
+            if raw:
+                return json.loads(raw)
             return []
-        except Exception as e:
-            logger.warning(f"Redis unavailable, using empty history: {e}")
-            return []  # Fallback auf leeren Verlauf
+        except Exception:
+            return []
 
-    async def save_history(self, conversation_id: str, contents: list):
-        try:
-            key = self._key(conversation_id)
-            data = json.dumps(contents)
-            await asyncio.to_thread(self.r.setex, key, self.ttl_seconds, data)
-        except Exception as e:
-            logger.warning(f"Could not save to Redis: {e}")
-        
-    async def connect(self):
-        """Einfacher Check, ob Redis verfügbar ist"""
-        try:
-            await asyncio.to_thread(self.r.ping)
-            logger.info("✅ Redis Memory Client verbunden")
-            return True
-        except Exception as e:
-            logger.error(f"⚠️ Redis Memory Client Fehler: {e}")
-            return False
+    async def save_messages(self, cid: str, messages: list):
+        await asyncio.to_thread(self.r.set, self.key_chat(cid), json.dumps(messages))
 
+    async def save_meta(self, cid: str, created_ts: int, last_message: str, title="Chat"):
+        meta = {
+            "id": cid,
+            "created": created_ts,
+            "updated": int(time.time()),
+            "title": title,
+            "last_message": last_message
+        }
+        await asyncio.to_thread(self.r.set, self.key_meta(cid), json.dumps(meta))
+
+    async def save_summary(self, cid: str, summary_text: str):
+        await asyncio.to_thread(self.r.set, self.key_summary(cid), summary_text)
+
+    async def get_meta(self, cid: str):
+        raw = await asyncio.to_thread(self.r.get, self.key_meta(cid))
+        if not raw:
+            return None
+        return json.loads(raw)
+
+    async def ping(self):
+        await asyncio.to_thread(self.r.ping)
 
 # --- C++ Coach Client ---
 class CppCoachClient:
@@ -400,103 +405,6 @@ class MCPGatewayClient:
         if self.client:
             await self.client.aclose()
 
-#class DockerMCPClient:
-#    """Kommuniziert mit laufendem Docker MCP Gateway"""
-#    
-#    def __init__(self):
-#        self.tools = []
-#    
-#    async def connect(self):
-#        """Prüft ob Gateway läuft"""
-#        try:
-#            # Prüfe ob Gateway läuft via CLI
-#            result = subprocess.run(
-#                ["docker", "mcp", "tools", "list"],
-#                capture_output=True,
-#                text=True,
-#                timeout=5
-#            )
-#            
-#            if result.returncode == 0:
-#                logger.info("✅ Docker MCP Gateway läuft")
-#                return True
-#            else:
-#                logger.error(f"Gateway nicht verfügbar: {result.stderr}")
-#                return False
-#                
-#        except Exception as e:
-#            logger.error(f"Gateway Check Error: {e}")
-#            return False
-#    
-#    async def fetch_tools(self):
-#        """Holt Tools vom Gateway via CLI"""
-#        try:
-#            result = subprocess.run(
-#                ["docker", "mcp", "tools", "list", "--format", "json"],
-#                capture_output=True,
-#                text=True,
-#                check=True
-#            )
-#            
-#            tools_data = json.loads(result.stdout)
-#            self.tools = []
-#            
-#            for tool in tools_data:
-#                self.tools.append({
-#                    "name": tool["name"],
-#                    "description": tool.get("description", ""),#
-#                    "parameters": tool.get("inputSchema", {
-#                        "type": "object",
-#                        "properties": {},
-#                        "required": []
-##                    })
-#                })
-#            
-#            logger.info(f"✅ {len(self.tools)} Tools vom Gateway geladen")
-#            return self.tools
-#            
-#        except subprocess.CalledProcessError as e:
-#            logger.error(f"Tools list failed: {e.stderr}")
-#            return []
-#        except Exception as e:
-#            logger.error(f"Fetch Tools Error: {e}")
-#            return []
-#    
-#    async def call_tool(self, tool_name: str, parameters: dict):
-#        """Führt Tool via Gateway CLI aus"""
-#        try:
-#            # Baue Command - Parameter müssen als JSON-String übergeben werden
-#            cmd = ["docker", "mcp", "tools", "call", tool_name]
-#            
-#            # WICHTIG: Parameter als stdin übergeben, nicht als --input flag
-#            result = subprocess.run(
-#                cmd,
-#                input=json.dumps(parameters),  # <-- Als stdin!
-#                capture_output=True,
-#                text=True,
-#                timeout=30
-#            )
-#            
-#            if result.returncode != 0:
-#                logger.error(f"Tool {tool_name} failed: {result.stderr}")
-#                return {"success": False, "error": result.stderr}
-#            
-#            return {
-#                "success": True,
-#                "output": result.stdout.strip()
-#            }
-#            
-#        except subprocess.TimeoutExpired:
-#            logger.error(f"Tool {tool_name} timeout")
-#            return {"success": False, "error": "Tool call timeout"}
-#        except Exception as e:
-#            logger.error(f"Tool Call Error: {e}")
-#            return {"success": False, "error": str(e)}
-#    
-#    async def disconnect(self):
-#        """Cleanup (nichts zu tun)"""
-#        pass
-
 
 
 # --- Gemini Client ---
@@ -701,13 +609,14 @@ coach = CppCoachClient(CPP_COACH_URL)
 gemini = GeminiClient(GEMINI_API_KEY, GEMINI_MODEL)
 mcp_client = MCPGatewayClient(gateway_host="localhost", gateway_port=PORT_MCP_GATEWAY)
 #mcp_client = DockerMCPClient() 
-memory_client = ConversationMemory(REDIS_URL)
+memory_client = ChatStorage(REDIS_URL)
 
 
 @app.on_event("startup")
 async def startup():
     # Verbinde Memory
-    await memory_client.connect() 
+    await memory_client.ping()
+    logger.info("✅ Redis ChatStorage verbunden")
     # Verbinde mit Gateway
     await mcp_client.connect()
     
@@ -787,19 +696,38 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
         system_prompt = prompt 
 
         # 2. Lade den persistenten Verlauf aus Redis
-        contents = await memory_client.load_history(request.conversation_id)
+        contents = await memory_client.load_messages(request.conversation_id)
         
         # 3. Wenn der Verlauf leer ist, initialisiere nur den persistenten System-Prompt
         if not contents:
-            logger.info(f"Starte Konversation {request.conversation_id}: Initialisiere System-Prompt.")
-            
-            # NUR DER PERSISTENTE SYSTEM-PROMPT WIRD GESPEICHERT
-            contents.append({"role": "user", "parts": [{"text": system_prompt}]}) 
-            contents.append({"role": "model", "parts": [{"text": "Verstanden, ich bin bereit."}]})
+            created_ts = int(time.time())
+
+            # System Prompt wird immer gespeichert
+            contents.append({
+                "role": "system",
+                "text": prompt,
+                "timestamp": created_ts
+            })
+
+            contents.append({
+                "role": "model",
+                "text": "Verstanden, ich bin bereit.",
+                "timestamp": created_ts + 1
+            })
+
+            await memory_client.save_meta(
+                request.conversation_id,
+                created_ts,
+                last_message="Verstanden, ich bin bereit."
+            )
         
         # 4. Füge die aktuelle User-Nachricht hinzu (persistent)
         # Die eigentliche User-Anfrage wird ZUERST hinzugefügt.
-        contents.append({"role": "user", "parts": [{"text": request.text}]})
+        contents.append({
+            "role": "user",
+            "text": request.text,
+            "timestamp": int(time.time())
+        })
 
         # 5. Führe Gemini-Generierung durch
         full_response = ""
@@ -809,6 +737,28 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
 
         if not full_response:
             full_response = "Entschuldigung, ich konnte keine Antwort generieren."
+
+        # --- HIER Punkt 6 EINSETZEN ---
+
+        # 6A: Modellantwort speichern (normale KI-Antwort)
+        model_ts = int(time.time())
+        contents.append({
+            "role": "model",
+            "text": full_response,
+            "timestamp": model_ts
+        })
+
+        # 6B: Toolcalls speichern (falls welche passiert sind)
+        # generate_with_tools hat eine Liste mit toolcalls geliefert
+        for call in mcp_client.collected_toolcalls:
+            contents.append({
+                "role": "tool",
+                "tool_name": call["name"],
+                "request": call["args"],
+                "response": call.get("result_data", {}),
+                "timestamp": int(time.time())
+            })
+    
 
         # 6. Bereinige temporäre Einträge im Verlauf (besserer Filter)
         clean_contents = []
@@ -832,11 +782,17 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
             clean_contents.append(entry)
 
         # 7. Speichere den bereinigten Verlauf zurück
-        await memory_client.save_history(request.conversation_id, clean_contents)
+        await memory_client.save_meta(
+            request.conversation_id,
+            created_ts=memory_client[0]["timestamp"],
+            last_message=full_response
+        )
         logger.info(f"💾 Verlauf für {request.conversation_id} gespeichert: {len(clean_contents)} Einträge")
 
         logger.info(f"Antwort generiert. Neuer bereinigter Verlauf: {len(contents)} Teile.")
         return ConversationResponse(response=full_response, conversation_id=request.conversation_id)
+    
+        # todo: summary generation after 6 messages
 
     except HTTPException:
         raise
