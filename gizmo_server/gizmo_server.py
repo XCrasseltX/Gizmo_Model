@@ -164,6 +164,8 @@ class MCPGatewayClient:
         self.tools = []
         self.message_id = 0
         self.session_id = None
+        self.collected_toolcalls = []   # hier sammeln wir die letzten Toolcalls
+
     
     async def connect(self):
         """Verbinde mit dem Gateway"""
@@ -596,6 +598,9 @@ class GeminiClient:
             # RUNDE 1.5 – Tools ausführen
             # ============================================================
             logger.info(f"Führe {len(function_calls)} Tool Call(s) aus.")
+
+            # Die Liste der Toolcalls am MCP-Client für diesen Run zurücksetzen
+            mcp_client.collected_toolcalls = []
             
             for call in function_calls:
                 tool_name = call["name"]
@@ -618,6 +623,13 @@ class GeminiClient:
                     err = result.get("error", "Unbekannter Fehler")
                     data = {"error": err}
                     logger.error(f"Toolfehler: {err}")
+
+                # ❗ Hier sammeln wir jetzt sauber alles
+                mcp_client.collected_toolcalls.append({
+                    "name": tool_name,
+                    "args": tool_args,
+                    "result_data": data
+                })
 
                 contents.append({
                     "role": "tool",
@@ -806,7 +818,7 @@ async def process_conversation(request: ConversationRequest) -> ConversationResp
 
         # 6B: Toolcalls speichern (falls welche passiert sind)
         # generate_with_tools hat eine Liste mit toolcalls geliefert
-        for call in mcp_client.fetch_tools:
+        for call in mcp_client.collected_toolcalls:
             contents.append({
                 "role": "tool",
                 "tool_name": call["name"],
