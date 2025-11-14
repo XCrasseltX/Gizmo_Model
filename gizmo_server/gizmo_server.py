@@ -560,8 +560,19 @@ class GeminiClient:
             # RUNDE 1 – normale Antwort + mögliche Toolcalls
             # ============================================================
             logger.info(f"Starte Runde 1. Aktuelle dynamische Emotion: {emotion}")
+            # Vor dem Absenden an Gemini ungültige Rollen herausfiltern
+            allowed_roles = ("user", "model")
+            safe_contents = [
+                {
+                    "role": c["role"],
+                    "parts": c.get("parts", [{"text": c.get("text", "")}])
+                }
+                for c in contents
+                if c.get("role") in allowed_roles
+            ]
+
             body_r1 = {
-                "contents": contents, 
+                "contents": safe_contents,
                 "tools": [tool_config] if tool_config else []
             }
 
@@ -624,9 +635,18 @@ class GeminiClient:
             logger.info("Starte Runde 2: Sende Tool-Ergebnisse an Gemini für finale Antwort.")
             
             # Der Body enthält jetzt den *gesamten* Verlauf
+            safe_contents_r2 = [
+                {
+                    "role": c["role"],
+                    "parts": c.get("parts", [{"text": c.get("text", "")}])
+                }
+                for c in contents
+                if c.get("role") in allowed_roles
+            ]
+
             body_r2 = {
-                "contents": contents,
-                "tools": [tool_config] if tool_config else [] # Tools müssen erneut gesendet werden
+                "contents": safe_contents_r2,
+                "tools": [tool_config] if tool_config else []
             }
 
             # --- Schritt 6: Finale Antwort streamen ---
