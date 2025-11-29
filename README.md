@@ -47,8 +47,8 @@ sudo systemctl enable gizmo.service
 # redis daten anschauen:
 docker exec -it redis-server redis-cli
 
-keys gizmo:conv:*
-get gizmo:conv:"Conversation-ID" | python3 -m json.tool
+keys gizmo:*
+get gizmo:conv:"Conversation-ID"
 
 # konversationen löschen um alles zu löschen einfach statt Conversation-ID ein *
 DEL gizmo:conv:"Conversation-ID" 

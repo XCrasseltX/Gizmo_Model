@@ -1,86 +1,125 @@
 #include "hormones.h"
 #include <cmath>
+#include <cstdlib> // für rand()
 
-static inline float sclip(float x, float lo, float hi) {
-    return std::max(lo, std::min(hi, x));
+// Zufallszahl zwischen min und max
+static float random_range(float min, float max) {
+    return min + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (max - min)));
+}
+
+// Lineare Interpolation (Sanftes Gleiten)
+static float lerp(float current, float target, float speed, float dt) {
+    return current + (target - current) * speed * dt;
+}
+
+HormoneSystem::HormoneSystem() {
+    // --- RICK SANCHEZ BASELINE ---
+    // Intelligent, Zynisch, Stressresistent, Wenig Bindung
+    base_config.dopamine      = 0.30f; // Eher gelangweilt
+    base_config.serotonin     = 0.70f; // Hohes Selbstbewusstsein (Arroganz)
+    base_config.cortisol      = 0.10f; // Cool unter Druck
+    base_config.adrenaline    = 0.20f; // Grundwachheit
+    base_config.oxytocin      = 0.05f; // Soziale Distanz
+    base_config.melatonin     = 0.05f; // Kaum müde
+    base_config.noradrenaline = 0.40f; // Fokus
+    base_config.endorphin     = 0.10f; 
+    base_config.acetylcholine = 0.85f; // Maximale kognitive Leistung
+    base_config.testosterone  = 0.60f; // Dominant
+
+    // Startwerte setzen
+    current = base_config;
+    target  = base_config;
+    event_timer = 2.0f; // Erster Event in 2 Sekunden
 }
 
 void HormoneSystem::update(float dt) {
-    const float tau = 10.0f;         // Trägheit der Hormone
-    const float damping = 0.1f;      // Dämpfung, verhindert Explosion
-    const float noise_amp = 0.002f;  // leichtes Rauschen
-    const float homeo = 0.2f;       // zieht zum Basiswert zurück
+    
+    // 1. TIMING: Wann kommt der nächste "Gedanke" / Stimmungsschwank?
+    event_timer -= dt;
 
-    const float base_dopa = 0.40f, base_ser = 0.25f, base_cor = 0.12f, base_adr = 0.25f;
-    const float base_oxy  = 0.10f, base_mel = 0.02f, base_nor = 0.30f, base_end = 0.20f;
-    const float base_ach  = 0.35f, base_tes = 0.30f;
+    if (event_timer <= 0.0f) {
+        // Neuen Timer setzen (Random 2 bis 7 Sekunden)
+        event_timer = random_range(2.0f, 7.0f);
 
-    auto noise = [&]() { return noise_amp * ((float)rand() / RAND_MAX - 0.5f); };
-    auto clip = [](float x){ return std::max(0.0f, std::min(1.0f, x)); };
+        // ENTSCHEIDUNG: Zurück zur Basis oder Chaos?
+        float dice = random_range(0.0f, 1.0f);
 
-    // Lokale "Geschwindigkeiten" für jedes Hormon (Persistent in der Klasse anlegen!)
-    static float v_dopa=0,v_ser=0,v_cor=0,v_adr=0,v_oxy=0,v_mel=0,v_nor=0,v_end=0,v_ach=0,v_tes=0;
-
-    // Homeostase + Rückkopplung
-    auto dyn = [&](float &x, float &v, float base, float drive, float excite, float inhibit) {
-        // Nichtlineare Rückstellkraft: stärker bei großen Abweichungen
-        float dx = x - base;
-        float F = -homeo * dx * (1.0f + 2.0f * std::abs(dx))   // nonlinear restoring
-                + 0.3f * drive
-                + 0.2f * (excite - inhibit)
-                + noise();
-
-        // Dämpfung leicht erhöht
-        v += dt * (F - damping * v);
-        x += dt / tau * v;
-
-        // Reflexion + Reibung
-        if (x > 1.0f) {
-            x = 1.0f;
-            v *= -0.3f;
-        } else if (x < 0.0f) {
-            x = 0.0f;
-            v *= -0.3f;
+        if (dice < 0.4f) {
+            // 40% Chance: "Reset to Base" (Rick fängt sich wieder)
+            target = base_config; 
+        } 
+        else if (dice < 0.7f) {
+            // 30% Chance: Leichte Variation (Tagesform)
+            target.dopamine      = base_config.dopamine      + random_range(-0.1f, 0.2f);
+            target.serotonin     = base_config.serotonin     + random_range(-0.1f, 0.1f);
+            target.adrenaline    = base_config.adrenaline    + random_range(-0.05f, 0.2f);
+            target.acetylcholine = base_config.acetylcholine + random_range(-0.1f, 0.1f);
+            // Rest bleibt grob gleich
+        } 
+        else {
+            // 30% Chance: Starker "Micro-Mood" (Zufälliger Impuls)
+            // Wir würfeln EINEN starken emotionalen Zustand
+            int mood = rand() % 4;
+            switch(mood) {
+                case 0: // "Eureka!" (Idee)
+                    target.dopamine = 0.9f; target.acetylcholine = 0.95f; target.adrenaline = 0.5f;
+                    break;
+                case 1: // "Genervt" (Cortisol Spike)
+                    target.cortisol = 0.6f; target.serotonin = 0.2f; target.dopamine = 0.1f;
+                    break;
+                case 2: // "Manisch" (Action)
+                    target.adrenaline = 0.8f; target.testosterone = 0.8f; target.noradrenaline = 0.7f;
+                    break;
+                case 3: // "Absturz" (Müde/Bored)
+                    target.dopamine = 0.05f; target.melatonin = 0.4f; target.acetylcholine = 0.3f;
+                    break;
+            }
         }
-    };
+    }
 
-    // gegenseitige Wechselwirkungen
-    dyn(dopamine,     v_dopa, base_dopa, drive_dopamine,   endorphin, cortisol);
-    dyn(serotonin,    v_ser,  base_ser,  0.0f,             oxytocin,  adrenaline);
-    dyn(cortisol,     v_cor,  base_cor,  drive_cortisol,   adrenaline, dopamine);
-    dyn(adrenaline,   v_adr,  base_adr,  drive_adrenaline, cortisol,   serotonin);
-    dyn(oxytocin,     v_oxy,  base_oxy,  0.0f,             serotonin, cortisol);
-    dyn(melatonin,    v_mel,  base_mel,  0.0f,             serotonin, adrenaline);
-    dyn(noradrenaline,v_nor,  base_nor,  0.0f,             adrenaline, cortisol);
-    dyn(endorphin,    v_end,  base_end,  0.0f,             dopamine,   cortisol);
-    dyn(acetylcholine,v_ach,  base_ach,  0.0f,             serotonin,  cortisol);
-    dyn(testosterone, v_tes,  base_tes,  0.0f,             adrenaline, cortisol);
+    // 2. INPUT VOM SNN (Die Spikes)
+    // Die Spikes überschreiben das Ziel temporär. 
+    // Wenn Spikes kommen, MÜSSEN die Werte hoch, egal was der Timer sagt.
+    
+    // Wir addieren die Drives auf das aktuelle Ziel drauf
+    HormoneSet effective_target = target;
+    
+    if (drive_dopamine > 0.01f)   effective_target.dopamine   += drive_dopamine;
+    if (drive_adrenaline > 0.01f) effective_target.adrenaline += drive_adrenaline;
+    if (drive_cortisol > 0.01f)   effective_target.cortisol   += drive_cortisol;
 
-    // Energieausgleich – verhindert Drift des Gesamtsystems
-    float total = dopamine + serotonin + cortisol + adrenaline + oxytocin +
-                  melatonin + noradrenaline + endorphin + acetylcholine + testosterone;
+    // Wenn Stress (Cortisol) hoch ist, sinkt Serotonin automatisch (Gegenspieler Logik simple)
+    if (effective_target.cortisol > 0.5f) effective_target.serotonin *= 0.5f;
 
-    float avg = total / 10.0f;
-    float correction = (0.5f - avg) * 0.002f;  // sanft zur Mitte
-    dopamine += correction;
-    serotonin += correction;
-    cortisol += correction;
-    adrenaline += correction;
-    oxytocin += correction;
-    melatonin += correction;
-    noradrenaline += correction;
-    endorphin += correction;
-    acetylcholine += correction;
-    testosterone += correction;
 
-    dopamine = clip(dopamine);
-    serotonin = clip(serotonin);
-    cortisol = clip(cortisol);
-    adrenaline = clip(adrenaline);
-    oxytocin = clip(oxytocin);
-    melatonin = clip(melatonin);
-    noradrenaline = clip(noradrenaline);
-    endorphin = clip(endorphin);
-    acetylcholine = clip(acetylcholine);
-    testosterone = clip(testosterone);
+    // 3. BEWEGUNG (Lerp)
+    // Wir bewegen uns vom 'current' zum 'effective_target'.
+    // speed bestimmt, wie träge das System ist.
+    float speed = 0.05f; // Ziemlich zügig reagieren
+
+    current.dopamine      = lerp(current.dopamine,      effective_target.dopamine,      speed, dt);
+    current.serotonin     = lerp(current.serotonin,     effective_target.serotonin,     speed, dt);
+    current.cortisol      = lerp(current.cortisol,      effective_target.cortisol,      speed, dt);
+    current.adrenaline    = lerp(current.adrenaline,    effective_target.adrenaline,    speed, dt);
+    current.oxytocin      = lerp(current.oxytocin,      effective_target.oxytocin,      speed, dt);
+    current.melatonin     = lerp(current.melatonin,     effective_target.melatonin,     speed, dt);
+    current.noradrenaline = lerp(current.noradrenaline, effective_target.noradrenaline, speed, dt);
+    current.endorphin     = lerp(current.endorphin,     effective_target.endorphin,     speed, dt);
+    current.acetylcholine = lerp(current.acetylcholine, effective_target.acetylcholine, speed, dt);
+    current.testosterone  = lerp(current.testosterone,  effective_target.testosterone,  speed, dt);
+
+    // 4. CLIPPING (Sicherheit)
+    // Werte zwischen 0.01 und 0.99 halten
+    auto clip = [](float &x) { x = std::max(0.01f, std::min(0.99f, x)); };
+    
+    clip(current.dopamine);
+    clip(current.serotonin);
+    clip(current.cortisol);
+    clip(current.adrenaline);
+    clip(current.oxytocin);
+    clip(current.melatonin);
+    clip(current.noradrenaline);
+    clip(current.endorphin);
+    clip(current.acetylcholine);
+    clip(current.testosterone);
 }

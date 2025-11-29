@@ -22,18 +22,18 @@ void Neurons::apply_hormones(const HormoneSystem& H) {
         float tref_factor = 1.0f;
 
         // --- Einfluss der Hormone ---
-        vth_change += -0.010f * H.dopamine;
-        vth_change += +0.015f * H.melatonin;
-        vth_change += -0.020f * H.cortisol;
-        vth_change += -0.005f * H.endorphin;
-        vth_change += -0.010f * H.adrenaline;
+        vth_change += -0.010f * H.current.dopamine;
+        vth_change += +0.015f * H.current.melatonin;
+        vth_change += -0.020f * H.current.cortisol;
+        vth_change += -0.005f * H.current.endorphin;
+        vth_change += -0.010f * H.current.adrenaline;
 
-        isyn_factor *= (1.0f + 0.5f * H.adrenaline);
-        isyn_factor *= (1.0f + 0.2f * H.dopamine);
-        isyn_factor *= (1.0f - 0.3f * H.oxytocin);
+        isyn_factor *= (1.0f + 0.5f * H.current.adrenaline);
+        isyn_factor *= (1.0f + 0.2f * H.current.dopamine);
+        isyn_factor *= (1.0f - 0.3f * H.current.oxytocin);
 
-        tau_factor  *= (1.0f + 0.3f * H.noradrenaline - 0.2f * H.acetylcholine);
-        tref_factor *= (1.0f + 0.4f * H.melatonin - 0.2f * H.endorphin);
+        tau_factor  *= (1.0f + 0.3f * H.current.noradrenaline - 0.2f * H.current.acetylcholine);
+        tref_factor *= (1.0f + 0.4f * H.current.melatonin - 0.2f * H.current.endorphin);
 
         // --- Anwenden ---
         Vth[i] += vth_change * dt;

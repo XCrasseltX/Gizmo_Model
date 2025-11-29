@@ -171,7 +171,7 @@ void Net::stdp_decay_traces() {
 }
 
 void Net::stdp_apply_updates() {
-    const float mod = 1.0f + 0.5f * H.dopamine - 0.3f * H.cortisol;
+    const float mod = 1.0f + 0.5f * H.current.dopamine - 0.3f * H.current.cortisol;
 
     for (size_t si = 0; si < syn.size(); ++si) {
         // Skip inhibitory synapses

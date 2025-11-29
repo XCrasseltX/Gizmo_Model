@@ -162,16 +162,16 @@ void IoLogger::log_spike(const HormoneSystem* H, int timestep, int spike_count) 
 
         // Nur die Hormone werden formatiert als Strings
         j["hormones"] = {
-            {"dopamine",      fmt2(H->dopamine)},
-            {"serotonin",     fmt2(H->serotonin)},
-            {"cortisol",      fmt2(H->cortisol)},
-            {"adrenaline",    fmt2(H->adrenaline)},
-            {"oxytocin",      fmt2(H->oxytocin)},
-            {"melatonin",     fmt2(H->melatonin)},
-            {"noradrenaline", fmt2(H->noradrenaline)},
-            {"endorphin",     fmt2(H->endorphin)},
-            {"acetylcholine", fmt2(H->acetylcholine)},
-            {"testosterone",  fmt2(H->testosterone)}
+            {"dopamine",      fmt2(H->current.dopamine)},
+            {"serotonin",     fmt2(H->current.serotonin)},
+            {"cortisol",      fmt2(H->current.cortisol)},
+            {"adrenaline",    fmt2(H->current.adrenaline)},
+            {"oxytocin",      fmt2(H->current.oxytocin)},
+            {"melatonin",     fmt2(H->current.melatonin)},
+            {"noradrenaline", fmt2(H->current.noradrenaline)},
+            {"endorphin",     fmt2(H->current.endorphin)},
+            {"acetylcholine", fmt2(H->current.acetylcholine)},
+            {"testosterone",  fmt2(H->current.testosterone)}
         };
     }
 
