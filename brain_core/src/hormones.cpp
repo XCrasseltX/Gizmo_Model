@@ -16,13 +16,13 @@ HormoneSystem::HormoneSystem() {
     // --- RICK SANCHEZ BASELINE ---
     // Intelligent, Zynisch, Stressresistent, Wenig Bindung
     base_config.dopamine      = 0.2f; // Eher gelangweilt
-    base_config.serotonin     = 1.0f; // Hohes Selbstbewusstsein (Arroganz)
+    base_config.serotonin     = 0.4f; // Hohes Selbstbewusstsein (Arroganz)
     base_config.cortisol      = 0.4f; // Cool unter Druck
-    base_config.adrenaline    = 0.20f; // Grundwachheit
+    base_config.adrenaline    = 0.30f; // Grundwachheit
     base_config.oxytocin      = 0.02f; // Soziale Distanz
-    base_config.melatonin     = 0.00f; // Kaum müde
+    base_config.melatonin     = 0.05f; // Kaum müde
     base_config.noradrenaline = 0.6f; // Fokus
-    base_config.endorphin     = 0.50f; 
+    base_config.endorphin     = 0.3f; 
     base_config.acetylcholine = 1.0f; // Maximale kognitive Leistung
     base_config.testosterone  = 0.6f; // Dominant
 /*
