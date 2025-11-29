@@ -15,17 +15,28 @@ static float lerp(float current, float target, float speed, float dt) {
 HormoneSystem::HormoneSystem() {
     // --- RICK SANCHEZ BASELINE ---
     // Intelligent, Zynisch, Stressresistent, Wenig Bindung
-    base_config.dopamine      = 0.90f; // Eher gelangweilt
+    base_config.dopamine      = 0.2f; // Eher gelangweilt
     base_config.serotonin     = 1.0f; // Hohes Selbstbewusstsein (Arroganz)
-    base_config.cortisol      = 0.05f; // Cool unter Druck
+    base_config.cortisol      = 0.4f; // Cool unter Druck
     base_config.adrenaline    = 0.20f; // Grundwachheit
-    base_config.oxytocin      = 0.00f; // Soziale Distanz
+    base_config.oxytocin      = 0.02f; // Soziale Distanz
     base_config.melatonin     = 0.00f; // Kaum müde
-    base_config.noradrenaline = 0.85f; // Fokus
-    base_config.endorphin     = 0.70f; 
+    base_config.noradrenaline = 0.6f; // Fokus
+    base_config.endorphin     = 0.50f; 
     base_config.acetylcholine = 1.0f; // Maximale kognitive Leistung
-    base_config.testosterone  = 0.95f; // Dominant
-
+    base_config.testosterone  = 0.6f; // Dominant
+/*
+    base_config.dopamine      = 0.30f;
+    base_config.serotonin     = 0.70f;
+    base_config.cortisol      = 0.10f;
+    base_config.adrenaline    = 0.20f;
+    base_config.oxytocin      = 0.05f;
+    base_config.melatonin     = 0.05f;
+    base_config.noradrenaline = 0.40f;
+    base_config.endorphin     = 0.10f;
+    base_config.acetylcholine = 0.85f;
+    base_config.testosterone  = 0.60f;
+*/
     // Startwerte setzen
     current = base_config;
     target  = base_config;
