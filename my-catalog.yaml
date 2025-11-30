@@ -1,0 +1,8 @@
+apiVersion: mcp.docker.com/v1alpha1
+kind: Catalog
+metadata:
+  name: my-pi-home-setup
+servers:
+  homeassistant:
+    type: sse
+    url: "http://192.168.178.71:7123/sse"
